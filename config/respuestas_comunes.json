@@ -1,0 +1,48 @@
+{
+  "preguntas_configuradas": {
+    "años_experiencia": {
+      "pregunta_patron": "years of experience|años de experiencia|experiencia laboral",
+      "respuestas": {
+        "software_engineer": "3",
+        "data_analyst": "2",
+        "consultor": "2",
+        "default": "3"
+      }
+    },
+    "disponibilidad": {
+      "pregunta_patron": "availability|disponibilidad|when can you start|cuándo puedes empezar",
+      "respuesta": "Inmediata / 2 semanas"
+    },
+    "pretensiones_salariales": {
+      "pregunta_patron": "salary|salario|renta|pretensiones",
+      "respuesta": "A convenir según el cargo y responsabilidades"
+    },
+    "autorizacion_trabajo": {
+      "pregunta_patron": "authorized to work|autorizado para trabajar|permiso de trabajo",
+      "respuesta": "Sí"
+    },
+    "nivel_ingles": {
+      "pregunta_patron": "english level|nivel de inglés|english proficiency",
+      "respuesta": "Intermediate / Avanzado"
+    },
+    "requiere_sponsor": {
+      "pregunta_patron": "require sponsorship|requiere sponsor|visa",
+      "respuesta": "No"
+    },
+    "titulo_profesional": {
+      "pregunta_patron": "degree|título|universidad|education level",
+      "respuesta": "Ingeniero en Ciencias de la Computación"
+    }
+  },
+  
+  "informacion_personal": {
+    "telefono": "+56912345678",
+    "ciudad": "Santiago",
+    "linkedin_url": "https://www.linkedin.com/in/tu-perfil"
+  },
+  
+  "respuestas_abiertas": {
+    "por_que_empresa": "Estoy interesado en esta posición porque se alinea con mi experiencia en desarrollo de software y automatización. Me motiva trabajar en proyectos que generen impacto y donde pueda seguir aprendiendo.",
+    "fortalezas": "Capacidad analítica, resolución de problemas, trabajo en equipo, aprendizaje rápido de nuevas tecnologías"
+  }
+}

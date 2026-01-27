@@ -1,0 +1,48 @@
+version: '3.8'
+
+services:
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: linkedin-automator-n8n
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=${N8N_USER}
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_PASSWORD}
+      - N8N_HOST=${N8N_HOST}
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - NODE_ENV=production
+      - EXECUTIONS_DATA_SAVE_ON_SUCCESS=all
+      - EXECUTIONS_DATA_SAVE_ON_ERROR=all
+      - TIMEZONE=America/Santiago
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./scripts:/scripts
+      - ./data:/data
+      - ./config:/config
+    networks:
+      - linkedin-automator-network
+
+  selenium-chrome:
+    image: selenium/standalone-chrome:latest
+    container_name: linkedin-automator-selenium
+    restart: unless-stopped
+    ports:
+      - "4444:4444"
+      - "7900:7900"  # Para ver el navegador en vivo (VNC)
+    shm_size: 2gb
+    environment:
+      - SE_NODE_MAX_SESSIONS=1
+      - SE_NODE_SESSION_TIMEOUT=300
+    networks:
+      - linkedin-automator-network
+
+volumes:
+  n8n_data:
+
+networks:
+  linkedin-automator-network:
+    driver: bridge

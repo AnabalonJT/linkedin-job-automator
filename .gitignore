@@ -1,0 +1,37 @@
+# Environment variables
+.env
+.env.local
+
+# Credentials
+config/linkedin_credentials.json
+config/google_credentials.json
+data/cookies/*
+*.pem
+
+# Logs
+data/logs/*
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# n8n data
+n8n_data/
+
+# Temporary files
+tmp/
+temp/

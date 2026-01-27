@@ -1,0 +1,64 @@
+# Configuración de búsqueda en LinkedIn
+busqueda:
+  palabras_clave:
+    - "software engineer"
+    - "ingeniero software"
+    - "desarrollador"
+    - "consultor"
+    - "data analyst"
+    - "automatización"
+  
+  ubicaciones:
+    - "Región Metropolitana, Chile"
+    - "Santiago, Chile"
+    - "Las Condes, Chile"
+    - "Providencia, Chile"
+    - "Vitacura, Chile"
+  
+  filtros:
+    fecha_publicacion: "past-week"  # past-24h, past-week, past-month
+    tipo_empleo:
+      - "Full-time"
+      - "Contract"
+    nivel_experiencia:
+      - "Entry level"
+      - "Associate"
+      - "Mid-Senior level"
+    trabajo_remoto: true  # Incluir trabajos remotos
+
+# CVs disponibles
+cvs:
+  software:
+    path: "/config/CV_Software_Engineer.pdf"
+    keywords:
+      - "software"
+      - "developer"
+      - "programador"
+      - "backend"
+      - "frontend"
+      - "full stack"
+  
+  consultoria:
+    path: "/config/CV_Consultoria_Data.pdf"
+    keywords:
+      - "consultor"
+      - "data"
+      - "analyst"
+      - "analytics"
+      - "business intelligence"
+      - "automatización"
+
+# Configuración de ejecución
+ejecucion:
+  max_aplicaciones_por_run: 20
+  tiempo_limite_minutos: 60
+  delay_entre_aplicaciones_segundos: 10
+  reintentos_en_error: 3
+  
+# Horarios de ejecución (cron)
+schedule:
+  activo: false  # Cambiar a true para activar
+  expresion_cron: "0 9 * * *"  # Diario a las 9 AM
+  # Otros ejemplos:
+  # "0 9 */2 * *"  # Cada 2 días a las 9 AM
+  # "0 9 * * 1"    # Cada lunes a las 9 AM
