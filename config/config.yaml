@@ -1,19 +1,50 @@
-# Configuración de búsqueda en LinkedIn
+# Configuración optimizada de búsqueda en LinkedIn
 busqueda:
+  # Keywords específicas (con apellido, evitar genéricas)
   palabras_clave:
     - "software engineer"
-    - "ingeniero software"
-    - "desarrollador"
-    - "consultor"
-    - "data analyst"
-    - "automatización"
+    - "backend developer"
+    - "backend engineer"
+    - "frontend developer"
+    - "frontend engineer"
+    - "full stack developer"
+    - "full stack engineer"
+    - "data engineer"
+    - "python developer"
+    - "ruby developer"
+    - "javascript developer"
+    - "ai developer"
+    - "machine learning engineer"
+  
+  # Keywords a EXCLUIR (filtrado negativo)
+  palabras_excluidas:
+    - "devops"
+    - "sre"
+    - "site reliability"
+    - "salesforce"
+    - "sap"
+    - ".net"
+    - "c#"
+    - "ios"
+    - "android"
+    - "mobile"
+    - "embedded"
+    - "firmware"
+    - "hardware"
+    - "openshift"
+    - "kubernetes"  # A menos que te interese
+    - "pl/sql"
+    - "oracle"
+    - "cobol"
+    - "mainframe"
   
   ubicaciones:
-    - "Región Metropolitana, Chile"
     - "Santiago, Chile"
     - "Las Condes, Chile"
     - "Providencia, Chile"
     - "Vitacura, Chile"
+    - "Lo Barnechea, Chile"
+    - "Chile (En remoto)"
   
   filtros:
     fecha_publicacion: "past-week"  # past-24h, past-week, past-month
@@ -24,12 +55,13 @@ busqueda:
       - "Entry level"
       - "Associate"
       - "Mid-Senior level"
-    trabajo_remoto: true  # Incluir trabajos remotos
+    trabajo_remoto: true
+    solo_easy_apply: true
 
 # CVs disponibles
 cvs:
   software:
-    path: "/config/CV_Software_Engineer.pdf"
+    path: "config/CV Software Engineer Anabalon.pdf"
     keywords:
       - "software"
       - "developer"
@@ -37,9 +69,13 @@ cvs:
       - "backend"
       - "frontend"
       - "full stack"
+      - "engineer"
+      - "python"
+      - "ruby"
+      - "javascript"
   
   consultoria:
-    path: "/config/CV_Consultoria_Data.pdf"
+    path: "config/CV Automatización_Data Anabalón.pdf"
     keywords:
       - "consultor"
       - "data"
@@ -47,6 +83,9 @@ cvs:
       - "analytics"
       - "business intelligence"
       - "automatización"
+      - "ai"
+      - "machine learning"
+      - "data engineer"
 
 # Configuración de ejecución
 ejecucion:
@@ -62,3 +101,7 @@ schedule:
   # Otros ejemplos:
   # "0 9 */2 * *"  # Cada 2 días a las 9 AM
   # "0 9 * * 1"    # Cada lunes a las 9 AM
+
+# Configuración de selección de CV
+seleccion_cv:
+  cv_por_defecto: "software"

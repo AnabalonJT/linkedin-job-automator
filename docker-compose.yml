@@ -8,10 +8,7 @@ services:
     ports:
       - "5678:5678"
     environment:
-      - N8N_BASIC_AUTH_ACTIVE=true
-      - N8N_BASIC_AUTH_USER=${N8N_USER}
-      - N8N_BASIC_AUTH_PASSWORD=${N8N_PASSWORD}
-      - N8N_HOST=${N8N_HOST}
+      - N8N_HOST=localhost
       - N8N_PORT=5678
       - N8N_PROTOCOL=http
       - NODE_ENV=production
@@ -32,7 +29,7 @@ services:
     restart: unless-stopped
     ports:
       - "4444:4444"
-      - "7900:7900"  # Para ver el navegador en vivo (VNC)
+      - "7900:7900"
     shm_size: 2gb
     environment:
       - SE_NODE_MAX_SESSIONS=1
