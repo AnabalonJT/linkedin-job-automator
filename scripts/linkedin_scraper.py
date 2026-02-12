@@ -6,6 +6,7 @@ Busca ofertas de trabajo en LinkedIn según criterios configurados
 
 import time
 import json
+import os
 from pathlib import Path
 from typing import List, Dict, Any
 from selenium import webdriver
@@ -36,22 +37,46 @@ class LinkedInScraper:
         """Configura el driver de Selenium con opciones anti-detección"""
         self.logger.info("Configurando Chrome driver...")
         
-        options = uc.ChromeOptions()
-        
-        if self.headless:
-            options.add_argument('--headless')
-        
-        # Opciones para evitar detección
-        options.add_argument('--disable-blink-features=AutomationControlled')
-        options.add_argument('--no-sandbox')
-        options.add_argument('--disable-dev-shm-usage')
-        options.add_argument('--disable-gpu')
-        options.add_argument('--window-size=1920,1080')
-        options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
+        # Detectar si estamos en Docker
+        in_docker = os.path.exists('/.dockerenv')
         
         try:
-            # Usar version_main para coincidir con tu Chrome instalado
-            self.driver = uc.Chrome(options=options, version_main=144)
+            if in_docker:
+                # Usar Selenium remoto en Docker
+                self.logger.info("Detectado ambiente Docker, usando Selenium remoto...")
+                from selenium.webdriver.remote.webdriver import WebDriver
+                from selenium.webdriver.remote.webelement import WebElement
+                
+                options = webdriver.ChromeOptions()
+                options.add_argument('--no-sandbox')
+                options.add_argument('--disable-dev-shm-usage')
+                options.add_argument('--disable-gpu')
+                options.add_argument('--window-size=1920,1080')
+                options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
+                
+                # Conectar a Selenium remoto (selenium-chrome service en Docker)
+                self.driver = webdriver.Remote(
+                    command_executor='http://selenium-chrome:4444',
+                    options=options
+                )
+            else:
+                # Usar undetected_chromedriver localmente
+                self.logger.info("Usando undetected_chromedriver localmente...")
+                options = uc.ChromeOptions()
+                
+                if self.headless:
+                    options.add_argument('--headless')
+                
+                options.add_argument('--disable-blink-features=AutomationControlled')
+                options.add_argument('--no-sandbox')
+                options.add_argument('--disable-dev-shm-usage')
+                options.add_argument('--disable-gpu')
+                options.add_argument('--window-size=1920,1080')
+                options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
+                
+                # Usar version_main para coincidir con tu Chrome instalado
+                self.driver = uc.Chrome(options=options, version_main=144)
+            
             self.logger.success("Chrome driver configurado exitosamente")
         except Exception as e:
             self.logger.error(f"Error configurando driver: {str(e)}")
@@ -452,6 +477,52 @@ def main():
         logger.error("No se pudieron cargar credenciales de LinkedIn")
         return
     
+    # Archivo de trabajos
+    output_file = Path("data/logs/jobs_found.json")
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+    
+    # ============================================================================
+    # PASO 1: Cargar TODOS los trabajos del Google Sheets y guardar en cache
+    # ============================================================================
+    all_sheets_jobs = []
+    all_sheets_urls = set()
+    
+    try:
+        from google_sheets_manager import GoogleSheetsManager
+        sheets_id = config.get_env_var('GOOGLE_SHEETS_ID')
+        if sheets_id and Path('config/google_credentials.json').exists():
+            sheets_manager = GoogleSheetsManager('config/google_credentials.json', sheets_id)
+            
+            # Obtener TODOS los trabajos del Google Sheets
+            all_sheets_jobs = sheets_manager.get_all_jobs_from_sheets()
+            all_sheets_urls = {job.get('url') for job in all_sheets_jobs if job.get('url')}
+            
+            # Marcar trabajos del Sheets como no nuevos (ya en base de datos)
+            for job in all_sheets_jobs:
+                job['is_new'] = False
+            
+            logger.info(f"✓ Cargados {len(all_sheets_jobs)} trabajos del Google Sheets")
+            
+            # Guardar todos del sheets en jobs_found.json (como source de verdad)
+            with open(output_file, 'w', encoding='utf-8') as f:
+                json.dump(all_sheets_jobs, f, indent=2, ensure_ascii=False)
+            logger.info(f"✓ Cache local actualizado con {len(all_sheets_jobs)} trabajos del Sheets")
+    except Exception as e:
+        logger.warning(f"No se pudo conectar a Google Sheets: {e}")
+        # Cargar del cache local como fallback
+        if output_file.exists():
+            try:
+                with open(output_file, 'r', encoding='utf-8') as f:
+                    all_sheets_jobs = json.load(f)
+                all_sheets_urls = {job.get('url') for job in all_sheets_jobs if job.get('url')}
+                logger.info(f"✓ Cargados {len(all_sheets_jobs)} trabajos del cache local")
+            except Exception as e2:
+                logger.warning(f"No se pudieron cargar trabajos existentes: {str(e2)}")
+    
+    # ============================================================================
+    # PASO 2: Buscar trabajos NUEVOS en LinkedIn
+    # ============================================================================
+    
     # Crear scraper
     scraper = LinkedInScraper(config, logger, headless=False)
     
@@ -464,56 +535,53 @@ def main():
             logger.error("Login fallido, abortando")
             return
         
-        # Cargar trabajos existentes
-        output_file = Path("data/logs/jobs_found.json")
-        output_file.parent.mkdir(parents=True, exist_ok=True)
+        # Extraer Job IDs para deduplicación
+        existing_job_ids = {extract_job_id_from_url(url) for url in all_sheets_urls if url}
         
-        existing_jobs = []
-        existing_job_ids = set()
-        
-        if output_file.exists():
-            try:
-                with open(output_file, 'r', encoding='utf-8') as f:
-                    existing_jobs = json.load(f)
-                # Extraer Job IDs de las URLs existentes
-                existing_job_ids = {extract_job_id_from_url(job['url']) for job in existing_jobs}
-                logger.info(f"Cargados {len(existing_jobs)} trabajos existentes")
-            except Exception as e:
-                logger.warning(f"No se pudieron cargar trabajos existentes: {str(e)}")
-        
-        # Buscar trabajos pasando los Job IDs existentes
+        # Buscar trabajos nuevos
         keywords = yaml_config['busqueda']['palabras_clave'][0]
         location = yaml_config['busqueda']['ubicaciones'][0]
         
-        jobs = scraper.search_jobs(keywords, location, num_jobs=25, existing_job_ids=existing_job_ids)
+        new_jobs = scraper.search_jobs(keywords, location, num_jobs=25, existing_job_ids=existing_job_ids)
         
-        # Mostrar resultados
-        logger.info(f"\n{'='*60}")
-        logger.info(f"RESULTADOS: {len(jobs)} trabajos encontrados")
-        logger.info(f"{'='*60}\n")
+        # Marcar trabajos nuevos como is_new:true
+        for job in new_jobs:
+            job['is_new'] = True
         
-        for i, job in enumerate(jobs, 1):
-            logger.info(f"{i}. {job['title']}")
-            logger.info(f"   Empresa: {job['company']}")
-            logger.info(f"   Ubicación: {job['location']}")
-            logger.info(f"   Easy Apply: {'✓' if job['has_easy_apply'] else '✗'}")
-            logger.info(f"   URL: {job['url']}")
-            logger.info("")
-        
-        # Guardar resultados
-        # Combinar trabajos existentes con nuevos
-        all_jobs = existing_jobs + jobs
+        # ============================================================================
+        # PASO 3: Guardar trabajos nuevos en cache y variable
+        # ============================================================================
         
         logger.info(f"\n{'='*60}")
-        logger.info(f"  Trabajos en archivo antes: {len(existing_jobs)}")
-        logger.info(f"  Trabajos nuevos encontrados: {len(jobs)}")
-        logger.info(f"  Total en archivo después: {len(all_jobs)}")
+        logger.info(f"RESULTADOS: {len(new_jobs)} trabajos nuevos encontrados")
+        logger.info(f"Trabajos ya en base de datos: {len(all_sheets_urls)}")
         logger.info(f"{'='*60}\n")
         
+        # Guardar trabajos: todos del sheets + los nuevos encontrados
+        all_jobs = all_sheets_jobs + new_jobs
         with open(output_file, 'w', encoding='utf-8') as f:
             json.dump(all_jobs, f, indent=2, ensure_ascii=False)
+        logger.success(f"✓ Cache local guardado: {len(all_jobs)} trabajos totales")
+        logger.info(f"  - {len(all_sheets_jobs)} trabajos existentes (is_new: false)")
+        logger.info(f"  - {len(new_jobs)} trabajos nuevos (is_new: true)")
         
-        logger.success(f"Resultados guardados en: {output_file}")
+        
+        # Mostrar los nuevos trabajos encontrados
+        if new_jobs:
+            logger.info("📋 Trabajos NUEVOS encontrados:")
+            for i, job in enumerate(new_jobs, 1):
+                logger.info(f"{i}. {job['title']}")
+                logger.info(f"   Empresa: {job['company']}")
+                logger.info(f"   Ubicación: {job['location']}")
+                logger.info(f"   Easy Apply: {'✓' if job['has_easy_apply'] else '✗'}")
+                logger.info(f"   URL: {job['url']}")
+                logger.info("")
+        
+        logger.info(f"\n{'='*60}")
+        logger.info(f"💾 jobs_found.json actualizado: {len(all_jobs)} trabajos totales")
+        logger.info(f"   ✓ Campo 'is_new' agregado a cada trabajo")
+        logger.info(f"{'='*60}\n")
+        logger.info(f"📝 Applier leerá jobs_found.json y postulará solo a trabajos con is_new: true")
         
     except Exception as e:
         logger.error(f"Error en ejecución: {str(e)}")

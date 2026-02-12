@@ -63,16 +63,18 @@ cvs:
   software:
     path: "config/CV Software Engineer Anabalon.pdf"
     keywords:
-      - "software"
       - "developer"
       - "programador"
       - "backend"
       - "frontend"
       - "full stack"
-      - "engineer"
       - "python"
       - "ruby"
       - "javascript"
+      - "nodejs"
+      - "django"
+      - "fastapi"
+      - "flask"
   
   consultoria:
     path: "config/CV Automatización_Data Anabalón.pdf"
@@ -85,7 +87,7 @@ cvs:
       - "automatización"
       - "ai"
       - "machine learning"
-      - "data engineer"
+      - "freelance"
 
 # Configuración de ejecución
 ejecucion:

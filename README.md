@@ -4,23 +4,82 @@
 
 > Para personas con TDAH (o cualquiera que prefiera no hacer tareas repetitivas)
 
+## 🏗️ Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    n8n Orchestration (Docker)                   │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                   │
+│  Scheduled (09:00 AM daily)                                     │
+│          ↓                                                       │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │ 1. linkedin_scraper.py                                   │  │
+│  │    • Search LinkedIn for new jobs                        │  │
+│  │    • Deduplicate against Google Sheets (source of truth) │  │
+│  │    • Cache results in jobs_found.json                    │  │
+│  └──────────────────────────────────────────────────────────┘  │
+│          ↓                                                       │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │ 2. linkedin_applier.py                                   │  │
+│  │    • Read jobs from cache (jobs_found.json)              │  │
+│  │    • Auto-apply to Easy Apply positions                  │  │
+│  │    • Send Telegram notifications per attempt             │  │
+│  │    • Save results to application_results.json            │  │
+│  └──────────────────────────────────────────────────────────┘  │
+│          ↓                                                       │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │ 3. google_sheets_manager.py                              │  │
+│  │    • Sync results to Google Sheets database              │  │
+│  │    • Update Dashboard with metrics                       │  │
+│  │    • Log pending questions                               │  │
+│  └──────────────────────────────────────────────────────────┘  │
+│          ↓                                                       │
+│  Telegram: "LinkedIn automation completed ✅"                  │
+│                                                                   │
+└─────────────────────────────────────────────────────────────────┘
+
+Data Storage & Flow:
+  Google Sheets (Single Source of Truth)
+         ↑
+         │ Sync results + Fetch applied URLs
+         │
+  jobs_found.json (Session Cache) ← linkedin_scraper.py
+         ↓
+  linkedin_applier.py (Reads from cache)
+         ↓
+  application_results.json
+         ↓
+  google_sheets_manager.py (Back to DB)
+```
+
 ## 🚀 Quick Start
 
 ```bash
-# 1. Clonar/actualizar proyecto
+# 1. Clone/navigate to project
 cd f:\Proyectos\linkedin-job-automator
 
-# 2. Instalar dependencias
+# 2. Install dependencies
 pip install -r requirements.txt
 
-# 3. Configurar credenciales
+# 3. Configure credentials
 python scripts/credentials_manager.py setup
 
-# 4. Iniciar Docker
+# 4. Setup Google Sheets
+#    - Create a Google Cloud project
+#    - Download service account credentials → config/google_credentials.json
+#    - Share your Google Sheet with the service account email
+#    - Add GOOGLE_SHEETS_ID to .env
+
+# 5. Setup Telegram (optional but recommended)
+#    - Create bot with @BotFather
+#    - Add TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID to .env
+
+# 6. Start Docker
 docker-compose up
 
-# 5. Acceder a n8n
-# Ir a: http://localhost:5678
+# 7. Access n8n
+#    Go to: http://localhost:5678
 ```
 
 ## ✨ Qué Hace Este Bot
@@ -28,8 +87,8 @@ docker-compose up
 ### 🔍 Búsqueda Automática
 - Busca trabajos en LinkedIn según criterios definidos
 - Filtra por ubicación, tipo de contrato, experiencia
-- Solo busca trabajos con \"Easy Apply\"
-- Evita duplicados inteligentemente
+- Solo busca trabajos con "Easy Apply"
+- **Evita duplicados inteligentemente** contra Google Sheets
 
 ### ✍️ Postulación Automática
 - Completa formularios de Easy Apply automáticamente
@@ -41,11 +100,12 @@ docker-compose up
 - Guarda todas las postulaciones en Google Sheets
 - Permite actualizar estado manualmente (Entrevista, Prueba, etc)
 - Accesible desde cualquier dispositivo
+- Dashboard con métricas en tiempo real
 
 ### 📱 Notificaciones en Tiempo Real
-- Telegram Bot te notifica de nuevos trabajos
+- Telegram Bot te notifica de cada postulación
 - Recibes confirmación de postulaciones exitosas
-- Alertas inmediatas de errores críticos
+- Alertas de trabajos que requieren atención manual
 
 ### ⏰ Totalmente Automático
 - Se ejecuta diariamente a la hora que definas
@@ -56,45 +116,86 @@ docker-compose up
 
 ## 📋 Documentación
 
-### Para Empezar
-1. **[RESUMEN_EJECUTIVO.md](RESUMEN_EJECUTIVO.md)** - Comienza aquí si es tu primera vez
-   - Qué es el proyecto
-   - Cómo funciona
-   - Estimación de tiempo
-   - Preguntas frecuentes
+### Inicio Rápido
+1. **[README.md](README.md)** ← Estás aquí
+   - Overview del proyecto
+   - Quick start
+   - Estructura
 
-### Para Entender Mejor
-2. **[ESPECIFICACION_PROYECTO.md](ESPECIFICACION_PROYECTO.md)** - Especificación completa
-   - Requisitos funcionales
+### Arquitectura & Orquestación
+2. **[N8N_ORCHESTRATION.md](N8N_ORCHESTRATION.md)** - Flujo de n8n
+   - Workflow completo
+   - Data flow & deduplication
+   - Setup steps
+   - Monitoring
+
+### Integración de Telegram
+3. **[TELEGRAM.md](TELEGRAM.md)** - Configuración de notificaciones
+   - Crear bot en BotFather
+   - Configurar credenciales
+   - Testing
+
+### Especificación del Proyecto
+4. **[ESPECIFICACION_PROYECTO.md](ESPECIFICACION_PROYECTO.md)** - Requerimientos
+   - Funcionalidades
    - Historias de usuario
-   - Arquitectura del sistema
-   - Plan de implementación
+   - Estructura de datos
 
-### Para Implementar
-3. **[PLAN_TECNICO.md](PLAN_TECNICO.md)** - Roadmap técnico
-   - 7 fases de implementación
-   - Estimación por fase
-   - Decisiones arquitectónicas
-   - Riesgos y mitigaciones
-
-4. **[ANALISIS_COMPONENTES.md](ANALISIS_COMPONENTES.md)** - Estado actual del código
-   - Análisis de cada módulo
-   - Qué está hecho vs falta
-   - Accionables priorizados
-
-### Preparación
-5. **[CHECKLIST_VALIDACION.md](CHECKLIST_VALIDACION.md)** - Antes de empezar
-   - Validación de código existente
-   - Credenciales necesarias
-   - Ambiente de desarrollo
-   - Checklist de pre-implementación
+### Documentación Técnica Avanzada
+5. **[PLAN_TECNICO.md](PLAN_TECNICO.md)** - Roadmap técnico
+6. **[ANALISIS_COMPONENTES.md](ANALISIS_COMPONENTES.md)** - Estado del código
+7. **[CHECKLIST_VALIDACION.md](CHECKLIST_VALIDACION.md)** - Validación pre-deploy
 
 ### Navegación
-6. **[INDICE_DOCUMENTACION.md](INDICE_DOCUMENTACION.md)** - Índice completo
-   - Mapa de todos los documentos
-   - Preguntas frecuentes por tipo de usuario
-   - Referencias rápidas
-   - Glosario de términos
+### Quick Testing
+
+```powershell
+# Windows PowerShell
+.\quickstart.ps1
+
+# Linux/Mac Bash
+bash quickstart.sh
+```
+
+Esto te dará un menú interactivo para:
+- ✅ Validar toda la setup
+- ✅ Ejecutar scraper/applier/sheets manualmente
+- ✅ Levantar Docker
+- ✅ Ver logs
+
+### Documentación
+
+#### 🚀 Para Comenzar
+- **[TESTING_GUIDE.md](TESTING_GUIDE.md)** ← Comienza aquí para pruebas
+  - Paso a paso: Docker → Tests → Validación
+  - Debugging tips
+  - Checklist completo
+
+#### 🏗️ Arquitectura & Orquestación
+- **[N8N_ORCHESTRATION.md](N8N_ORCHESTRATION.md)** - Flujo de n8n
+  - Workflow completo
+  - Data flow & deduplication
+  - Setup steps
+  - Monitoring & troubleshooting
+
+#### 📱 Integración Externa
+- **[TELEGRAM.md](TELEGRAM.md)** - Configuración de notificaciones
+  - Crear bot en BotFather
+  - Configurar credenciales
+  - Testing
+
+#### 📊 Estado & Documentación
+- **[ESTADO_PROYECTO.md](ESTADO_PROYECTO.md)** - Estado actual
+  - Qué está completado
+  - Architecture overview
+  - File structure
+  - Próximos pasos
+
+#### 🔧 Especificaciones
+- **[ESPECIFICACION_PROYECTO.md](ESPECIFICACION_PROYECTO.md)** - Requerimientos
+  - Funcionalidades
+  - Historias de usuario
+  - Estructura de datos
 
 ---
 

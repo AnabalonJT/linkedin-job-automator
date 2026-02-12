@@ -17,11 +17,10 @@ services:
       - TIMEZONE=America/Santiago
     volumes:
       - n8n_data:/home/node/.n8n
-      - ./scripts:/scripts
-      - ./data:/data
-      - ./config:/config
+      - .:/app  # Mount entire repo to /app in container
     networks:
       - linkedin-automator-network
+    working_dir: /app
 
   selenium-chrome:
     image: selenium/standalone-chrome:latest
@@ -34,6 +33,19 @@ services:
     environment:
       - SE_NODE_MAX_SESSIONS=1
       - SE_NODE_SESSION_TIMEOUT=300
+    networks:
+      - linkedin-automator-network
+
+  runner:
+    image: python:3.11-slim
+    container_name: linkedin-automator-runner
+    restart: unless-stopped
+    volumes:
+      - .:/app
+    working_dir: /app
+    command: bash -c "pip install -r requirements.txt --no-cache-dir || true && python scripts/runner_server.py"
+    ports:
+      - "5000:5000"
     networks:
       - linkedin-automator-network
 

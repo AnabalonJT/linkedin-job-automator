@@ -48,8 +48,16 @@ class Config:
             return json.load(f)
     
     def get_linkedin_credentials(self, password: str = None) -> Optional[Dict[str, str]]:
-        """Obtiene credenciales de LinkedIn encriptadas"""
+        """Obtiene credenciales de LinkedIn encriptadas
+        
+        Si no se proporciona contraseña, intenta desde LINKEDIN_MASTER_PASSWORD env var
+        """
         manager = CredentialsManager(str(self.config_dir))
+        
+        # Si no hay password, intentar desde env (para Docker)
+        if password is None:
+            password = os.getenv('LINKEDIN_MASTER_PASSWORD')
+        
         credentials = manager.load_credentials(password)
         
         if credentials and 'linkedin' in credentials:
@@ -149,7 +157,34 @@ def select_cv_by_keywords(job_title: str, job_description: str, config: Config) 
     
     text_to_analyze = (job_title + " " + job_description).lower()
     
-    # Contar matches para cada tipo de CV
+    # ============================================================================
+    # PASO 1: Palabras clave DEFINITIVAS (prioridad alta)
+    # ============================================================================
+    
+    # Si contiene "freelance", usar consultoria
+    if "freelance" in text_to_analyze or "freelancer" in text_to_analyze:
+        return "consultoria"
+    
+    # Si contiene "data engineer" completo, usar consultoria (más específico que solo "engineer")
+    if "data engineer" in text_to_analyze:
+        return "consultoria"
+    
+    # Si contiene "machine learning" o "ml", usar consultoria
+    if "machine learning" in text_to_analyze or " ml " in text_to_analyze:
+        return "consultoria"
+    
+    # Si contiene "business intelligence" o "bi", usar consultoria
+    if "business intelligence" in text_to_analyze or " bi " in text_to_analyze:
+        return "consultoria"
+    
+    # Si contiene "data analyst" o "analytics", usar consultoria
+    if "data analyst" in text_to_analyze or "analytics" in text_to_analyze:
+        return "consultoria"
+    
+    # ============================================================================
+    # PASO 2: Scoring por keywords si no hay coincidencia definitiva
+    # ============================================================================
+    
     scores = {}
     for cv_type, cv_info in cv_config.items():
         keywords = cv_info.get('keywords', [])

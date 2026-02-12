@@ -81,7 +81,12 @@ class CredentialsManager:
             salt = f.read()
         
         if password is None:
-            password = getpass("\n🔑 Ingresa tu contraseña maestra: ")
+            # Intentar obtener de variable de entorno (para Docker)
+            password = os.getenv('LINKEDIN_MASTER_PASSWORD')
+            
+            if password is None:
+                # Si no está en env, solicitar interactivamente
+                password = getpass("\n🔑 Ingresa tu contraseña maestra: ")
         
         key, _ = self._generate_key(password, salt)
         return key

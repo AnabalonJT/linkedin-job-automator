@@ -68,24 +68,39 @@ class GoogleSheetsManager:
             print(f"✓ Hoja '{title}' encontrada")
             return worksheet
         except gspread.WorksheetNotFound:
-            # Crear nueva hoja
-            worksheet = self.spreadsheet.add_worksheet(
-                title=title,
-                rows=1000,
-                cols=20
-            )
-            
-            # Agregar encabezados si se proporcionan
-            if headers:
-                worksheet.append_row(headers)
-                # Formatear encabezados
-                worksheet.format('A1:Z1', {
-                    "textFormat": {"bold": True},
-                    "backgroundColor": {"red": 0.9, "green": 0.9, "blue": 0.9}
-                })
-            
-            print(f"✓ Hoja '{title}' creada")
-            return worksheet
+            # Crear nueva hoja, pero manejar posible condición de carrera
+            try:
+                worksheet = self.spreadsheet.add_worksheet(
+                    title=title,
+                    rows=1000,
+                    cols=20
+                )
+
+                # Agregar encabezados si se proporcionan
+                if headers:
+                    worksheet.append_row(headers)
+                    # Formatear encabezados
+                    worksheet.format('A1:Z1', {
+                        "textFormat": {"bold": True},
+                        "backgroundColor": {"red": 0.9, "green": 0.9, "blue": 0.9}
+                    })
+
+                print(f"✓ Hoja '{title}' creada")
+                return worksheet
+
+            except Exception as e:
+                # Si al crear la hoja la API indica que ya existe (condición de carrera), intentar recuperarla
+                err_msg = str(e)
+                if 'already exists' in err_msg or 'A sheet with the name' in err_msg:
+                    try:
+                        worksheet = self.spreadsheet.worksheet(title)
+                        print(f"✓ Hoja '{title}' encontrada después de intento de creación")
+                        return worksheet
+                    except Exception:
+                        # Re-raise original exception si no se puede recuperar
+                        raise
+                # Re-raise para cualquier otro error
+                raise
     
     def add_job_application(self, job: Dict[str, Any], result: Dict[str, Any] = None):
         """
@@ -186,75 +201,58 @@ class GoogleSheetsManager:
             question: Texto de la pregunta
             job_url: URL del trabajo relacionado
         """
-        worksheet = self.get_or_create_worksheet(
-            'Preguntas_Pendientes',
-            headers=['Fecha', 'Pregunta', 'URL Oferta', 'Estado']
-        )
-        
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        
-        # Verificar si la pregunta ya existe
-        all_values = worksheet.get_all_values()
-        for row in all_values[1:]:  # Skip header
-            if row[1] == question:  # Pregunta ya existe
-                return
-        
-        row = [
-            now,
-            question,
-            job_url,
-            'PENDIENTE'
-        ]
-        
-        worksheet.append_row(row)
-        print(f"  ✓ Pregunta agregada a Google Sheets")
+        try:
+            worksheet = self.get_or_create_worksheet(
+                'Preguntas_Pendientes',
+                headers=['Fecha', 'Pregunta', 'URL Oferta', 'Estado']
+            )
+            
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            
+            # Verificar si la pregunta ya existe
+            all_values = worksheet.get_all_values()
+            for row in all_values[1:]:  # Skip header
+                if len(row) > 1 and row[1] == question:  # Pregunta ya existe
+                    return
+            
+            row = [
+                now,
+                question,
+                job_url,
+                'PENDIENTE'
+            ]
+            
+            worksheet.append_row(row)
+            print(f"  ✓ Pregunta agregada a Google Sheets")
+        except Exception as e:
+            print(f"  ✗ Error agregando pregunta: {str(e)}")
+            # No fallar si las preguntas no se pueden agregar
+            pass
     
     def update_dashboard(self):
-        """Actualiza el dashboard con estadísticas"""
-        # Obtener datos de Postulaciones
-        postulaciones_ws = self.spreadsheet.worksheet('Postulaciones')
-        all_data = postulaciones_ws.get_all_values()[1:]  # Skip header
-        
-        if not all_data:
-            print("  No hay datos para actualizar dashboard")
-            return
-        
-        # Calcular métricas
-        total = len(all_data)
-        aplicadas = sum(1 for row in all_data if row[8] == 'APPLIED')
-        manual = sum(1 for row in all_data if row[8] == 'MANUAL')
-        pendiente = sum(1 for row in all_data if row[8] == 'PENDIENTE')
-        
-        # Obtener o crear Dashboard
-        dashboard_ws = self.get_or_create_worksheet(
-            'Dashboard',
-            headers=['Métrica', 'Valor']
-        )
-        
-        # Limpiar dashboard
-        dashboard_ws.clear()
-        
-        # Agregar encabezados
-        dashboard_ws.update('A1:B1', [['Métrica', 'Valor']])
-        dashboard_ws.format('A1:B1', {
-            "textFormat": {"bold": True},
-            "backgroundColor": {"red": 0.2, "green": 0.6, "blue": 0.9}
-        })
-        
-        # Agregar métricas
-        metrics = [
-            ['Total Postulaciones', total],
-            ['Aplicadas Automáticamente', aplicadas],
-            ['Requieren Atención Manual', manual],
-            ['Pendientes', pendiente],
-            ['', ''],
-            ['Tasa de Automatización', f"{(aplicadas/total*100):.1f}%" if total > 0 else "0%"],
-            ['Última Actualización', datetime.now().strftime("%Y-%m-%d %H:%M:%S")]
-        ]
-        
-        dashboard_ws.update('A2:B8', metrics)
-        
-        print(f"  ✓ Dashboard actualizado: {total} postulaciones, {aplicadas} automáticas")
+        """Verifica/crea el dashboard pero NO lo actualiza (las fórmulas se actualizan solas)"""
+        try:
+            # Solo asegurarse que existe la hoja Dashboard
+            # Las fórmulas en Google Sheets se actualizan automáticamente
+            dashboard_ws = self.get_or_create_worksheet(
+                'Dashboard',
+                headers=['Métrica', 'Valor']
+            )
+            
+            # NO actualizar/limpiar - dejar que las fórmulas hagan su trabajo
+            # El Dashboard debe tener fórmulas como:
+            # - Total Postulaciones: =COUNTA(Postulaciones!A:A)-1
+            # - Aplicadas esta semana: =COUNTIFS(Postulaciones!B:B,">="&TODAY()-7)
+            # - En Revisión: =COUNTIF(Postulaciones!I:I,"EN_REVISION")
+            # - Entrevistas: =COUNTIF(Postulaciones!I:I,"ENTREVISTA")
+            # - Rechazadas: =COUNTIF(Postulaciones!I:I,"RECHAZADO")
+            # - Tasa de Respuesta: =IF(B2>0,B4/B2*100,0)&"%"
+            
+            print(f"  ✓ Dashboard verificado (las fórmulas se actualizan automáticamente)")
+        except Exception as e:
+            print(f"  ✗ Error verificando dashboard: {str(e)}")
+            # No fallar si el dashboard no se puede verificar
+            pass
     
     def get_all_applied_urls(self) -> set:
         """
@@ -273,6 +271,34 @@ class GoogleSheetsManager:
             return urls
         except gspread.WorksheetNotFound:
             return set()
+    
+    def get_all_jobs_from_sheets(self) -> list:
+        """
+        Obtiene todos los trabajos ya registrados en Postulaciones
+        
+        Returns:
+            Lista de diccionarios con los trabajos
+        """
+        try:
+            worksheet = self.spreadsheet.worksheet('Postulaciones')
+            all_data = worksheet.get_all_values()[1:]  # Skip header
+            
+            jobs = []
+            for row in all_data:
+                if len(row) > 4:  # Asegurar que hay suficientes columnas
+                    job = {
+                        'title': row[3] if len(row) > 3 else 'N/A',
+                        'company': row[2] if len(row) > 2 else 'N/A',
+                        'url': row[4] if len(row) > 4 else 'N/A',
+                        'location': row[5] if len(row) > 5 else 'N/A',
+                        'posted_date': 'N/A',
+                        'source': 'google_sheets'
+                    }
+                    jobs.append(job)
+            
+            return jobs
+        except gspread.WorksheetNotFound:
+            return []
 
 
 def main():

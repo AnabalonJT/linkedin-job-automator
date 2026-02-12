@@ -1,0 +1,81 @@
+{
+  "name": "LinkedIn Job Automator - Orquestación",
+  "nodes": [
+    {
+      "id": "1",
+      "typeVersion": 1,
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "name": "Scheduled Trigger",
+      "parameters": {
+        "cronExpression": "0 09 * * *"
+      },
+      "position": [50, 50]
+    },
+    {
+      "id": "2",
+      "typeVersion": 1,
+      "type": "n8n-nodes-base.httpRequest",
+      "name": "Run Scraper (runner)",
+      "parameters": {
+        "url": "http://runner:5000/run/scraper",
+        "method": "GET",
+        "responseFormat": "json",
+        "options": {}
+      },
+      "position": [250, 50]
+    },
+    {
+      "id": "3",
+      "typeVersion": 1,
+      "type": "n8n-nodes-base.httpRequest",
+      "name": "Run Applier (runner)",
+      "parameters": {
+        "url": "http://runner:5000/run/applier",
+        "method": "GET",
+        "responseFormat": "json",
+        "options": {}
+      },
+      "position": [450, 50]
+    },
+    {
+      "id": "4",
+      "typeVersion": 1,
+      "type": "n8n-nodes-base.httpRequest",
+      "name": "Sync to Google Sheets (runner)",
+      "parameters": {
+        "url": "http://runner:5000/run/sync",
+        "method": "GET",
+        "responseFormat": "json",
+        "options": {}
+      },
+      "position": [650, 50]
+    },
+    {
+      "id": "5",
+      "typeVersion": 1,
+      "type": "n8n-nodes-base.httpRequest",
+      "name": "Telegram Notification",
+      "parameters": {
+        "url": "http://runner:5000/notify/telegram",
+        "method": "GET",
+        "responseFormat": "json",
+        "options": {}
+      },
+      "position": [850, 50]
+    }
+  ],
+  "connections": {
+    "1": {
+      "main": [[{"node": "2", "type": "main", "index": 0}]]
+    },
+    "2": {
+      "main": [[{"node": "3", "type": "main", "index": 0}]]
+    },
+    "3": {
+      "main": [[{"node": "4", "type": "main", "index": 0}]]
+    },
+    "4": {
+      "main": [[{"node": "5", "type": "main", "index": 0}]]
+    }
+  }
+}

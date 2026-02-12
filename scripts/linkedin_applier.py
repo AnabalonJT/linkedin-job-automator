@@ -16,6 +16,12 @@ from selenium.webdriver.common.keys import Keys
 
 from utils import Config, Logger, select_cv_by_keywords
 
+# Optional: Telegram notifier (graceful if env not configured)
+try:
+    from telegram_notifier import TelegramNotifier
+except Exception:
+    TelegramNotifier = None
+
 
 class LinkedInApplier:
     """Aplicador automático a trabajos de LinkedIn"""
@@ -564,22 +570,27 @@ def main():
         logger.error("No se pudieron cargar credenciales")
         return
     
-    # Cargar trabajos para aplicar
+    # ============================================================================
+    # PASO 1: Cargar solo los NUEVOS trabajos del scraper
+    # ============================================================================
+    
+    # Cargar todos los trabajos de jobs_found.json y filtrar solo los nuevos (is_new: true)
     jobs_file = Path("data/logs/jobs_found.json")
     if not jobs_file.exists():
-        logger.error("No hay trabajos para aplicar. Ejecuta primero linkedin_scraper.py")
+        logger.info("No hay trabajos para aplicar (jobs_found.json no existe)")
         return
     
     with open(jobs_file, 'r', encoding='utf-8') as f:
         all_jobs = json.load(f)
     
-    # Filtrar solo trabajos con Easy Apply que no se hayan aplicado
-    pending_jobs = [job for job in all_jobs if job.get('has_easy_apply') and not job.get('applied', False)]
+    # Filtrar solo trabajos nuevos (is_new: true) con Easy Apply
+    new_jobs = [job for job in all_jobs if job.get('is_new', False)]
+    pending_jobs = [job for job in new_jobs if job.get('has_easy_apply')]
     
-    logger.info(f"Trabajos pendientes de aplicar: {len(pending_jobs)}")
+    logger.info(f"Trabajos NUEVOS pendientes de aplicar: {len(pending_jobs)}")
     
     if len(pending_jobs) == 0:
-        logger.info("No hay trabajos pendientes")
+        logger.info("No hay trabajos nuevos con Easy Apply")
         return
     
     # Crear scraper (para reutilizar driver y login)
@@ -592,13 +603,45 @@ def main():
     
     # Crear applier
     applier = LinkedInApplier(scraper.driver, config, logger)
+
+    # Inicializar Telegram (si está disponible)
+    notifier = None
+    if TelegramNotifier:
+        try:
+            notifier = TelegramNotifier()
+            logger.info('✓ Telegram notifier inicializado')
+        except Exception as e:
+            logger.warning(f'Telegram no configurado: {e}')
     
-    # Aplicar a primeros 3 trabajos (prueba)
+    # Inicializar Google Sheets para agregar resultados
+    sheets_manager = None
+    try:
+        from google_sheets_manager import GoogleSheetsManager
+        sheets_id = config.get_env_var('GOOGLE_SHEETS_ID')
+        if sheets_id and Path('config/google_credentials.json').exists():
+            sheets_manager = GoogleSheetsManager('config/google_credentials.json', sheets_id)
+            logger.info('✓ Google Sheets manager inicializado')
+    except Exception as e:
+        logger.warning(f'Google Sheets no disponible: {e}')
+    
+    # ============================================================================
+    # PASO 2: Aplicar solo a los trabajos nuevos
+    # ============================================================================
+    
     results = []
-    for i, job in enumerate(pending_jobs[:3]):
-        logger.info(f"\n--- Trabajo {i+1}/3 ---")
+    for i, job in enumerate(pending_jobs):
+        logger.info(f"\n--- Trabajo {i+1}/{len(pending_jobs)} ---")
         result = applier.apply_to_job(job)
         results.append(result)
+        
+        # Agregar a Google Sheets INMEDIATAMENTE (sin esperar a que termine todo)
+        if sheets_manager:
+            try:
+                sheets_manager.add_job_application(job, result)
+                logger.info('  ✓ Agregado a Google Sheets')
+            except Exception as e:
+                logger.warning(f'  ✗ Error agregando a Google Sheets: {e}')
+        
         time.sleep(5)  # Delay entre aplicaciones
     
     # Mostrar resumen
@@ -606,16 +649,24 @@ def main():
     logger.info("RESUMEN DE APLICACIONES")
     logger.info(f"{'='*60}")
     
-    successful = sum(1 for r in results if r['success'])
+    successful = sum(1 for r in results if r.get('success'))
     logger.info(f"Exitosas: {successful}/{len(results)}")
     logger.info(f"Fallidas: {len(results) - successful}/{len(results)}")
     
-    # Guardar resultados
+    # Guardar resultados en archivo de logs
     results_file = Path("data/logs/application_results.json")
     with open(results_file, 'w', encoding='utf-8') as f:
         json.dump(results, f, indent=2, ensure_ascii=False)
     
     logger.success(f"Resultados guardados en: {results_file}")
+    
+    # Actualizar dashboard si está disponible
+    if sheets_manager:
+        try:
+            sheets_manager.update_dashboard()
+            logger.info('✓ Dashboard actualizado')
+        except Exception as e:
+            logger.warning(f'No se pudo actualizar dashboard: {e}')
     
     scraper.close()
 
