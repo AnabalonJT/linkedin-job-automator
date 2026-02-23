@@ -138,6 +138,10 @@ class Logger:
     def success(self, message: str):
         """Log nivel SUCCESS"""
         self.log(message, "SUCCESS")
+    
+    def debug(self, message: str):
+        """Log nivel DEBUG (mismo que INFO pero para detalles)"""
+        self.log(message, "DEBUG")
 
 
 def select_cv_by_keywords(job_title: str, job_description: str, config: Config) -> str:
@@ -161,9 +165,10 @@ def select_cv_by_keywords(job_title: str, job_description: str, config: Config) 
     # PASO 1: Palabras clave DEFINITIVAS (prioridad alta)
     # ============================================================================
     
-    # Si contiene "freelance", usar consultoria
-    if "freelance" in text_to_analyze or "freelancer" in text_to_analyze:
+    # Si contiene "automatización" o "automatizacion", usar consultoria
+    if "automatización" in text_to_analyze or "automatizacion" in text_to_analyze:
         return "consultoria"
+
     
     # Si contiene "data engineer" completo, usar consultoria (más específico que solo "engineer")
     if "data engineer" in text_to_analyze:

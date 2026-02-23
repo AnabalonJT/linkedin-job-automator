@@ -208,6 +208,176 @@ def setup_linkedin_credentials():
         print("💡 El bot las usará automáticamente cuando sea necesario.")
 
 
+def setup_openrouter_credentials():
+    """Configurar API key de OpenRouter para IA"""
+    print("\n" + "=" * 60)
+    print("🤖 CONFIGURACIÓN DE OPENROUTER (IA)")
+    print("=" * 60)
+    
+    manager = CredentialsManager()
+    
+    print("\n📝 OpenRouter es el proveedor de IA (Llama-3.3-70B)")
+    print("Obtén tu API key en: https://openrouter.ai/keys")
+    
+    api_key = getpass("\nOpenRouter API Key (sk-or-...): ").strip()
+    
+    if not api_key:
+        print("❌ API key no puede estar vacía")
+        return
+    
+    confirm = input("\n¿Estás seguro? (s/n): ").lower()
+    if confirm != 's':
+        return
+    
+    credentials = manager.load_credentials() or {}
+    credentials['openrouter'] = {"api_key": api_key}
+    
+    if manager.save_credentials(credentials):
+        print("\n✅ OpenRouter API key guardada exitosamente")
+        # Actualizar .env
+        _update_env_file('OPENROUTER_API_KEY', api_key)
+
+
+def setup_cv_paths():
+    """Configurar rutas de CVs duales"""
+    print("\n" + "=" * 60)
+    print("📄 CONFIGURACIÓN DE CVs (SISTEMA DUAL)")
+    print("=" * 60)
+    
+    manager = CredentialsManager()
+    
+    print("\n📝 Ingresa las rutas de tus CVs:")
+    print("(Formato: config/archivo.pdf)")
+    
+    cv_software = input("\nRuta CV Software Engineer (ej: config/CV Software Engineer.pdf): ").strip()
+    cv_data = input("Ruta CV Data Scientist/Ingeniero (ej: config/CV Data.pdf): ").strip()
+    
+    if not cv_software or not cv_data:
+        print("❌ Ambas rutas son requeridas")
+        return
+    
+    print(f"\n{'-' * 60}")
+    print(f"CV Software: {cv_software}")
+    print(f"CV Data: {cv_data}")
+    print(f"{'-' * 60}")
+    
+    confirm = input("\n¿Los datos son correctos? (s/n): ").lower()
+    if confirm != 's':
+        return
+    
+    credentials = manager.load_credentials() or {}
+    credentials['cvs'] = {
+        "cv_software_path": cv_software,
+        "cv_data_path": cv_data
+    }
+    
+    if manager.save_credentials(credentials):
+        print("\n✅ Rutas de CVs guardadas exitosamente")
+        _update_env_file('CV_SOFTWARE_PATH', cv_software)
+        _update_env_file('CV_ENGINEER_PATH', cv_data)
+
+
+def setup_google_sheets():
+    """Configurar Google Sheets para sincronización"""
+    print("\n" + "=" * 60)
+    print("📊 CONFIGURACIÓN DE GOOGLE SHEETS")
+    print("=" * 60)
+    
+    manager = CredentialsManager()
+    
+    print("\n📝 Google Sheets ID para sincronizar resultados")
+    print("(Lo encuentras en la URL: /spreadsheets/d/[ID])")
+    
+    sheets_id = input("\nGoogle Sheets ID: ").strip()
+    
+    if not sheets_id:
+        print("❌ ID no puede estar vacío")
+        return
+    
+    confirm = input("\n¿Estás seguro? (s/n): ").lower()
+    if confirm != 's':
+        return
+    
+    credentials = manager.load_credentials() or {}
+    credentials['google_sheets'] = {"id": sheets_id}
+    
+    if manager.save_credentials(credentials):
+        print("\n✅ Google Sheets ID guardado exitosamente")
+        _update_env_file('GOOGLE_SHEETS_ID', sheets_id)
+
+
+def setup_telegram():
+    """Configurar Telegram para notificaciones"""
+    print("\n" + "=" * 60)
+    print("📱 CONFIGURACIÓN DE TELEGRAM (NOTIFICACIONES)")
+    print("=" * 60)
+    
+    manager = CredentialsManager()
+    
+    print("\n📝 Configura Telegram para recibir notificaciones")
+    print("Crea un bot en: https://t.me/BotFather")
+    
+    bot_token = getpass("\nBot Token (123:ABC...): ").strip()
+    chat_id = input("Tu Chat ID (números): ").strip()
+    
+    if not bot_token or not chat_id:
+        print("❌ Token y Chat ID son requeridos")
+        return
+    
+    print(f"\n{'-' * 60}")
+    print(f"Bot Token: {bot_token[:20]}...")
+    print(f"Chat ID: {chat_id}")
+    print(f"{'-' * 60}")
+    
+    confirm = input("\n¿Los datos son correctos? (s/n): ").lower()
+    if confirm != 's':
+        return
+    
+    credentials = manager.load_credentials() or {}
+    credentials['telegram'] = {
+        "token": bot_token,
+        "chat_id": chat_id
+    }
+    
+    if manager.save_credentials(credentials):
+        print("\n✅ Telegram configurado exitosamente")
+        _update_env_file('TELEGRAM_TOKEN', bot_token)
+        _update_env_file('TELEGRAM_CHAT_ID', chat_id)
+
+
+def _update_env_file(key: str, value: str):
+    """Actualiza o agrega variable al archivo .env"""
+    try:
+        env_file = Path(".env")
+        
+        if not env_file.exists():
+            with open(env_file, 'w') as f:
+                f.write(f"{key}={value}\n")
+            return
+        
+        # Leer líneas existentes
+        with open(env_file, 'r') as f:
+            lines = f.readlines()
+        
+        # Actualizar o agregar
+        updated = False
+        for i, line in enumerate(lines):
+            if line.startswith(f"{key}="):
+                lines[i] = f"{key}={value}\n"
+                updated = True
+                break
+        
+        if not updated:
+            lines.append(f"{key}={value}\n")
+        
+        # Escribir
+        with open(env_file, 'w') as f:
+            f.writelines(lines)
+            
+    except Exception as e:
+        print(f"⚠️  No se pudo actualizar .env: {e}")
+
+
 def test_credentials():
     """Prueba que las credenciales se puedan leer correctamente"""
     print("\n🧪 Probando lectura de credenciales...")
@@ -219,10 +389,36 @@ def test_credentials():
         print("\n✅ Credenciales de LinkedIn encontradas:")
         print(f"   Email: {credentials['linkedin']['username']}")
         print(f"   Password: {'*' * len(credentials['linkedin']['password'])}")
-        return True
     else:
         print("\n❌ No se encontraron credenciales de LinkedIn")
-        return False
+    
+    if credentials and 'openrouter' in credentials:
+        api_key = credentials['openrouter']['api_key']
+        print("\n✅ OpenRouter API key encontrada:")
+        print(f"   Key: {api_key[:20]}...{api_key[-10:]}")
+    else:
+        print("\n⚠️  OpenRouter no configurado")
+    
+    if credentials and 'cvs' in credentials:
+        print("\n✅ CVs configurados:")
+        print(f"   Software: {credentials['cvs'].get('cv_software_path', 'N/A')}")
+        print(f"   Data: {credentials['cvs'].get('cv_data_path', 'N/A')}")
+    else:
+        print("\n⚠️  CVs no configurados")
+    
+    if credentials and 'google_sheets' in credentials:
+        print("\n✅ Google Sheets configurado:")
+        print(f"   ID: {credentials['google_sheets']['id'][:30]}...")
+    else:
+        print("\n⚠️  Google Sheets no configurado")
+    
+    if credentials and 'telegram' in credentials:
+        print("\n✅ Telegram configurado:")
+        print(f"   Bot Token: {credentials['telegram']['token'][:20]}...")
+    else:
+        print("\n⚠️  Telegram no configurado")
+    
+    return bool(credentials and 'linkedin' in credentials)
 
 
 def main():
@@ -233,6 +429,20 @@ def main():
         
         if command == "setup":
             setup_linkedin_credentials()
+        elif command == "setup-openrouter":
+            setup_openrouter_credentials()
+        elif command == "setup-cvs":
+            setup_cv_paths()
+        elif command == "setup-sheets":
+            setup_google_sheets()
+        elif command == "setup-telegram":
+            setup_telegram()
+        elif command == "setup-all":
+            setup_linkedin_credentials()
+            setup_openrouter_credentials()
+            setup_cv_paths()
+            setup_google_sheets()
+            setup_telegram()
         elif command == "test":
             test_credentials()
         elif command == "delete":
@@ -242,7 +452,16 @@ def main():
                 manager.delete_credentials()
         else:
             print(f"Comando desconocido: {command}")
-            print("\nUso: python credentials_manager.py [setup|test|delete]")
+            print("\nUso: python credentials_manager.py [comando]")
+            print("\nComandos disponibles:")
+            print("  setup            - Configurar LinkedIn")
+            print("  setup-openrouter - Configurar OpenRouter IA")
+            print("  setup-cvs        - Configurar CVs")
+            print("  setup-sheets     - Configurar Google Sheets")
+            print("  setup-telegram   - Configurar Telegram")
+            print("  setup-all        - Configurar todo")
+            print("  test             - Probar credenciales")
+            print("  delete           - Eliminar todas las credenciales")
         
         return
     
@@ -251,39 +470,63 @@ def main():
         print("\n" + "=" * 60)
         print("🔐 GESTOR DE CREDENCIALES - LinkedIn Job Automator")
         print("=" * 60)
-        print("\n1. Configurar credenciales de LinkedIn")
-        print("2. Probar lectura de credenciales")
-        print("3. Ver credenciales guardadas")
-        print("4. Eliminar todas las credenciales")
-        print("5. Salir")
+        print("\n📌 LINKEDIN (Requerido):")
+        print("  1. Configurar credenciales de LinkedIn")
+        print("\n🤖 IA & SERVICIOS:")
+        print("  2. Configurar OpenRouter (Llama-3.3-70B)")
+        print("  3. Configurar CVs (Sistema Dual)")
+        print("  4. Configurar Google Sheets (Sincronización)")
+        print("  5. Configurar Telegram (Notificaciones)")
+        print("\n🔍 MANTENIMIENTO:")
+        print("  6. Probar todas las credenciales")
+        print("  7. Ver todas las credenciales guardadas")
+        print("  8. Eliminar todas las credenciales")
+        print("  9. Salir")
         
-        choice = input("\nSelecciona una opción (1-5): ").strip()
+        choice = input("\nSelecciona una opción (1-9): ").strip()
         
         if choice == "1":
             setup_linkedin_credentials()
         
         elif choice == "2":
-            test_credentials()
+            setup_openrouter_credentials()
         
         elif choice == "3":
+            setup_cv_paths()
+        
+        elif choice == "4":
+            setup_google_sheets()
+        
+        elif choice == "5":
+            setup_telegram()
+        
+        elif choice == "6":
+            test_credentials()
+        
+        elif choice == "7":
             manager = CredentialsManager()
             credentials = manager.load_credentials()
             if credentials:
                 print("\n📋 Credenciales guardadas:")
                 for service, data in credentials.items():
                     print(f"\n🔹 {service.upper()}:")
-                    print(f"   Usuario: {data['username']}")
-                    print(f"   Password: {'*' * len(data['password'])}")
+                    if isinstance(data, dict):
+                        for key, value in data.items():
+                            if isinstance(value, str) and len(value) > 20:
+                                value = f"{value[:20]}...{value[-10:]}"
+                            elif isinstance(value, str) and 'password' in key.lower():
+                                value = f"{'*' * len(value)}"
+                            print(f"   {key}: {value}")
             else:
                 print("\n⚠️  No hay credenciales guardadas")
         
-        elif choice == "4":
+        elif choice == "8":
             manager = CredentialsManager()
             confirm = input("\n⚠️  ¿Estás seguro? Esto eliminará TODAS las credenciales (s/n): ")
             if confirm.lower() == 's':
                 manager.delete_credentials()
         
-        elif choice == "5":
+        elif choice == "9":
             print("\n👋 ¡Hasta luego!")
             break
         

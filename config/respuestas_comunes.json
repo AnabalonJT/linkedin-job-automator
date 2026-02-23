@@ -137,8 +137,17 @@
         "remuneración",
         "sueldo",
         "expected salary",
-        "salary expectations"
+        "salary expectations",
+        "expectativa de renta",
+        "expectativa.*salario",
+        "renta.*esperada",
+        "salario.*esperado",
+        "pretensión de renta",
+        "expectativa de compensación"
       ],
+      "respuesta": "A convenir según el cargo, responsabilidades y beneficios. Abierto a discutir la remuneración según la propuesta.",
+      "respuesta_corta": "A convenir",
+      "respuesta_detallada": "Abierto a discutir según la propuesta del cargo, responsabilidades, beneficios y oportunidades de crecimiento.",
       "respuestas_por_nivel": {
         "junior": "A convenir según el cargo, responsabilidades y beneficios. Rango referencial: CLP $1.200.000 - $1.800.000",
         "semi_senior": "A convenir según el cargo, responsabilidades y beneficios. Rango referencial: CLP $1.800.000 - $2.500.000",
@@ -199,268 +208,13 @@
       ],
       "respuesta": "Nativo",
       "respuesta_detallada": "Español nativo, lengua materna"
-    },
-
-    "titulo_profesional": {
-      "patrones": [
-        "degree",
-        "título",
-        "universidad",
-        "education level",
-        "nivel de estudios",
-        "bachelor",
-        "licenciatura"
-      ],
-      "respuestas": {
-        "corta": "Ingeniero en Ciencias de la Computación",
-        "completa": "Ingeniero Civil en Ciencias de la Computación con mención en Modelación Matemática Aplicada",
-        "universidad": "Universidad de los Andes, Santiago, Chile (Egreso 2025)"
-      },
-      "respuesta_default": "Ingeniero en Ciencias de la Computación"
-    },
-
-    "trabajo_remoto": {
-      "patrones": [
-        "remote work",
-        "trabajo remoto",
-        "teletrabajo",
-        "work from home",
-        "modalidad",
-        "presencial",
-        "híbrido"
-      ],
-      "respuestas": {
-        "preferencia": "Abierto a modalidad remota, híbrida o presencial",
-        "solo_remoto": "Sí, tengo experiencia trabajando 100% remoto con excelentes resultados",
-        "hibrido_preferido": "Prefiero modalidad híbrida, pero abierto a otras opciones",
-        "presencial_ok": "Sin problema con trabajo presencial en Región Metropolitana (zona oriente preferentemente)"
-      },
-      "respuesta_default": "Abierto a cualquier modalidad: remoto, híbrido o presencial"
-    },
-
-    "ubicacion_preferida": {
-      "patrones": [
-        "location preference",
-        "ubicación preferida",
-        "dónde vives",
-        "where are you based",
-        "dispuesto a relocalizarse"
-      ],
-      "respuesta": "Santiago, Región Metropolitana (zona oriente preferentemente)",
-      "respuesta_detallada": "Resido en Santiago, Región Metropolitana. Preferencia por zona oriente (Las Condes, Providencia, Vitacura) para modalidad presencial, pero abierto a otras comunas dependiendo del proyecto."
-    },
-
-    "dispuesto_viajar": {
-      "patrones": [
-        "willing to travel",
-        "dispuesto a viajar",
-        "disponibilidad para viajar",
-        "travel required"
-      ],
-      "respuesta": "Sí",
-      "respuesta_detallada": "Sí, estoy dispuesto a viajar ocasionalmente según las necesidades del proyecto. No tengo restricciones de movilidad."
-    },
-
-    "por_que_esta_empresa": {
-      "patrones": [
-        "why this company",
-        "por qué esta empresa",
-        "why do you want to work here",
-        "por qué quieres trabajar aquí",
-        "why are you interested"
-      ],
-      "respuesta_template": "Me interesa esta posición porque se alinea con mi experiencia en [TECH_STACK] y mi objetivo de trabajar en proyectos que generen impacto real. Valoro empresas donde pueda seguir aprendiendo, aportar soluciones técnicas y crecer profesionalmente.",
-      "keywords_a_mencionar": [
-        "aprendizaje continuo",
-        "impacto real",
-        "trabajo en equipo",
-        "tecnologías modernas",
-        "retos técnicos",
-        "crecimiento profesional"
-      ]
-    },
-
-    "fortalezas": {
-      "patrones": [
-        "strengths",
-        "fortalezas",
-        "what are your strengths",
-        "cuáles son tus fortalezas",
-        "greatest strengths"
-      ],
-      "respuesta": "Capacidad analítica y resolución de problemas, aprendizaje rápido de nuevas tecnologías, trabajo autónomo y en equipo, enfoque en entregar valor de negocio",
-      "respuesta_detallada": "Mis principales fortalezas son: (1) Capacidad de aprender tecnologías nuevas rápidamente y aplicarlas en proyectos reales, (2) Pensamiento analítico para resolver problemas complejos de forma estructurada, (3) Autonomía para llevar proyectos end-to-end desde requerimientos hasta producción, (4) Comunicación efectiva con stakeholders técnicos y no técnicos."
-    },
-
-    "debilidades": {
-      "patrones": [
-        "weaknesses",
-        "debilidades",
-        "areas de mejora",
-        "what are your weaknesses"
-      ],
-      "respuesta": "A veces tiendo a enfocarme mucho en los detalles técnicos, pero he aprendido a balancear esto priorizando según impacto de negocio. Estoy trabajando activamente en mejorar mis habilidades de comunicación en presentaciones técnicas ante audiencias grandes.",
-      "enfoque": "Mencionar debilidad real pero con plan de mejora activo"
-    },
-
-    "herramientas_dominio": {
-      "python": {
-        "nivel": "Avanzado (5 años)",
-        "detalle": "Scripting, automatización, Django (básico), data processing, ML (PyTorch, TensorFlow)"
-      },
-      "ruby_on_rails": {
-        "nivel": "Avanzado (3 años)",
-        "detalle": "Desarrollo full stack, APIs RESTful, ActiveRecord, Devise, Background Jobs"
-      },
-      "django": {
-        "nivel": "Intermedio (1 año)",
-        "detalle": "MVT pattern, ORM, autenticación, despliegue básico"
-      },
-      "javascript": {
-        "nivel": "Intermedio",
-        "detalle": "ES6+, manipulación del DOM, integración con APIs"
-      },
-      "angular": {
-        "nivel": "Intermedio",
-        "detalle": "Componentes, servicios, routing, proyectos académicos y profesionales"
-      },
-      "sql": {
-        "nivel": "Avanzado",
-        "detalle": "Queries complejas, optimización, diseño de bases de datos. PostgreSQL, MySQL"
-      },
-      "nosql": {
-        "nivel": "Intermedio",
-        "detalle": "Cassandra, Redis, Elasticsearch (proyectos académicos y profesionales)"
-      },
-      "docker": {
-        "nivel": "Intermedio",
-        "detalle": "Containerización de aplicaciones, docker-compose, despliegue básico"
-      },
-      "aws": {
-        "nivel": "Básico-Intermedio",
-        "detalle": "S3 (uso frecuente), Lambda, EMR, IoT (experiencia limitada)"
-      },
-      "git": {
-        "nivel": "Avanzado",
-        "detalle": "Control de versiones, branching strategies, colaboración en equipo"
-      },
-      "machine_learning": {
-        "nivel": "Intermedio",
-        "detalle": "PyTorch, TensorFlow, modelos generativos (GANs, VAEs), procesamiento de datos, métricas de evaluación"
-      },
-      "automatizacion": {
-        "nivel": "Intermedio-Avanzado",
-        "detalle": "n8n, Selenium, web scraping, integración de APIs, scripts Python"
-      }
-    },
-
-    "proyectos_destacados": {
-      "patrones": [
-        "tell me about a project",
-        "cuéntame sobre un proyecto",
-        "project you're proud of",
-        "proyecto del que estés orgulloso"
-      ],
-      "respuestas": [
-        {
-          "nombre": "MakiMotion - Sistema de Gestión de Pacientes",
-          "descripcion": "Desarrollé una aplicación web completa para gestión de pacientes desde cero, levantando requerimientos con el cliente, diseñando arquitectura y desplegando en producción. El sistema está actualmente en uso por equipo médico.",
-          "tech": "Django, PostgreSQL, HTML/CSS/JavaScript, Render",
-          "impacto": "Redujo tiempo de gestión administrativa en ~60% y centraliza información de 100+ pacientes"
-        },
-        {
-          "nombre": "Tesis - Comparación de Modelos Generativos",
-          "descripcion": "Implementé y comparé 5 modelos generativos de imágenes (GANs, VAEs) usando PyTorch. Incluye procesamiento de datasets grandes (15GB+), pipeline de evaluación automatizado y análisis estadístico de resultados.",
-          "tech": "PyTorch, TensorFlow, Python, NumPy, Pandas",
-          "impacto": "Presentación exitosa ante comité académico, código optimizado para GPU"
-        },
-        {
-          "nombre": "Bot de Automatización de Postulaciones LinkedIn",
-          "descripcion": "Desarrollé un sistema completo que automatiza búsqueda, filtrado y postulación a ofertas de trabajo en LinkedIn, con seguimiento en Google Sheets y notificaciones por Telegram.",
-          "tech": "n8n, Python, Selenium, Google Sheets API, Docker",
-          "impacto": "Redujo tiempo de postulación de 10min a <30seg por oferta"
-        }
-      ]
-    },
-
-    "metodologias_agiles": {
-      "patrones": [
-        "agile",
-        "scrum",
-        "metodologías ágiles",
-        "kanban",
-        "sprints"
-      ],
-      "respuesta": "Sí, tengo experiencia trabajando con metodologías ágiles",
-      "respuesta_detallada": "Experiencia trabajando con metodologías ágiles en proyectos académicos y profesionales. Familiarizado con Scrum (sprints, dailys, retrospectivas) y Kanban para gestión de tareas. Desarrollé incluso una aplicación para evaluación de equipos ágiles en mi práctica en Tinet."
-    },
-
-    "testing": {
-      "patrones": [
-        "testing experience",
-        "pruebas",
-        "unit tests",
-        "qa",
-        "quality assurance"
-      ],
-      "respuesta": "Experiencia básica con testing unitario y de integración",
-      "respuesta_detallada": "Experiencia escribiendo tests unitarios en RSpec (Rails) y pytest (Python). Familiarizado con TDD como concepto, aunque no lo practico consistentemente. Experiencia debuggeando y solucionando bugs en producción."
-    },
-
-    "liderazgo_equipos": {
-      "patrones": [
-        "team lead",
-        "liderazgo",
-        "led a team",
-        "dirigir equipo",
-        "management experience"
-      ],
-      "respuesta": "No tengo experiencia formal liderando equipos, pero sí coordinando con stakeholders y trabajando autónomamente",
-      "respuesta_detallada": "No tengo experiencia formal como team lead, pero he trabajado de forma autónoma liderando proyectos end-to-end, tomando decisiones técnicas y coordinando directamente con clientes y stakeholders. Abierto a crecer en roles con mayor responsabilidad de equipo."
-    },
-
-    "preferencia_tecnologia": {
-      "patrones": [
-        "preferred technology",
-        "tecnología preferida",
-        "favorite stack",
-        "what do you like to work with"
-      ],
-      "respuesta": "Ruby on Rails para backend web, Python para automatización y data",
-      "respuesta_detallada": "Prefiero Ruby on Rails para desarrollo backend web por su productividad y convenciones. Para automatización, scripting y data processing prefiero Python por su ecosistema. Disfruto trabajar full stack cuando el proyecto lo requiere."
-    },
-
-    "certificaciones": {
-      "patrones": [
-        "certifications",
-        "certificaciones",
-        "credentials"
-      ],
-      "respuesta": "TOEFL ITP, Cambridge FCE (Inglés C1)",
-      "respuesta_detallada": "Certificaciones de inglés: TOEFL ITP y Cambridge FCE nivel C1. Webinar técnico: Introduction to Bionic Prostheses (P4HBionics, 2025)"
-    },
-
-    "tipo_contrato": {
-      "patrones": [
-        "contract type",
-        "tipo de contrato",
-        "full time",
-        "part time",
-        "freelance",
-        "contractor"
-      ],
-      "respuesta": "Abierto a tiempo completo o freelance/proyecto",
-      "respuesta_detallada": "Preferencia por posición full-time para desarrollo a largo plazo, pero abierto a freelance o trabajo por proyecto según alcance y duración"
     }
   },
 
   "respuestas_abiertas_template": {
     "por_que_cambio_trabajo": "Busco nuevos desafíos técnicos y oportunidades de crecimiento profesional donde pueda aportar mi experiencia en [TECNOLOGIA] y seguir aprendiendo.",
-    
     "que_te_motiva": "Me motiva resolver problemas reales a través de la tecnología y ver el impacto tangible de mi trabajo. Disfruto aprender constantemente y trabajar en proyectos donde pueda aplicar creatividad técnica.",
-    
     "donde_te_ves_5_anos": "Me veo consolidado como ingeniero senior con expertise profundo en [AREA], contribuyendo a proyectos de alto impacto y posiblemente mentoreando a desarrolladores junior.",
-    
     "mayor_logro": "Uno de mis mayores logros fue desarrollar completamente el sistema de gestión de MakiMotion desde cero hasta producción, coordinando directamente con usuarios finales y resolviendo sus necesidades reales de forma autónoma."
   },
 
@@ -494,8 +248,8 @@
   },
 
   "notas_configuracion": {
-    "actualizacion": "2025-01-28",
-    "version": "1.0",
-    "instrucciones": "Este archivo contiene las respuestas configuradas para el bot de LinkedIn. Los patrones se buscan con regex case-insensitive. Las respuestas se seleccionan según contexto del puesto."
+    "actualizacion": "2025-02-17",
+    "version": "1.1",
+    "instrucciones": "Este archivo contiene las respuestas configuradas para el bot de LinkedIn. Los patrones se buscan con regex case-insensitive. Las respuestas se seleccionan según contexto del puesto. UNA SOLA sección preguntas_configuradas activa."
   }
 }

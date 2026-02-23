@@ -4,11 +4,67 @@ LinkedIn Job Scraper
 Busca ofertas de trabajo en LinkedIn según criterios configurados
 """
 
+# Workaround para Python 3.12+ donde distutils fue removido
+# MUST BE FIRST antes de cualquier otro import
+import sys
+import re
+
+# Crear un módulo distutils fake si no existe
+if 'distutils' not in sys.modules:
+    class LooseVersion:
+        """Compatible replacement for distutils.version.LooseVersion"""
+        component_re = re.compile(r'(\d+ | [a-z]+ | \.)', re.VERBOSE)
+        
+        def __init__(self, vstring):
+            self.vstring = vstring
+            self.version = [x for x in self.component_re.split(vstring) if x and x != '.']
+            for i, obj in enumerate(self.version):
+                try:
+                    self.version[i] = int(obj)
+                except ValueError:
+                    pass
+        
+        def _cmp(self, other):
+            for a, b in zip(self.version, other.version):
+                if isinstance(a, int) and isinstance(b, str):
+                    return -1
+                elif isinstance(a, str) and isinstance(b, int):
+                    return 1
+                elif a < b:
+                    return -1
+                elif a > b:
+                    return 1
+            if len(self.version) < len(other.version):
+                return -1
+            elif len(self.version) > len(other.version):
+                return 1
+            return 0
+        
+        def __lt__(self, other): return self._cmp(other) < 0
+        def __le__(self, other): return self._cmp(other) <= 0
+        def __gt__(self, other): return self._cmp(other) > 0
+        def __ge__(self, other): return self._cmp(other) >= 0
+        def __eq__(self, other): return self._cmp(other) == 0
+        def __ne__(self, other): return self._cmp(other) != 0
+        def __str__(self): return self.vstring
+        def __repr__(self): return f"LooseVersion('{self.vstring}')"
+        def __getitem__(self, index): return self.version[index]
+        def __len__(self): return len(self.version)
+    
+    # Crear módulo fake
+    class FakeDistutils:
+        class version:
+            LooseVersion = LooseVersion
+    
+    sys.modules['distutils'] = FakeDistutils()
+    sys.modules['distutils.version'] = FakeDistutils.version
+
 import time
 import json
 import os
 from pathlib import Path
 from typing import List, Dict, Any
+
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -84,23 +140,38 @@ class LinkedInScraper:
     
     def save_cookies(self):
         """Guarda cookies de la sesión"""
-        cookies = self.driver.get_cookies()
-        with open(self.cookies_file, 'w') as f:
-            json.dump(cookies, f)
-        self.logger.info("Cookies guardadas")
+        try:
+            cookies = self.driver.get_cookies()
+            with open(self.cookies_file, 'w') as f:
+                json.dump(cookies, f)
+            self.logger.info(f"✓ {len(cookies)} cookies guardadas en {self.cookies_file}")
+        except Exception as e:
+            self.logger.warning(f"⚠ Error guardando cookies: {str(e)}")
     
     def load_cookies(self):
         """Carga cookies guardadas"""
-        if self.cookies_file.exists():
-            with open(self.cookies_file, 'r') as f:
-                cookies = json.load(f)
-            
-            for cookie in cookies:
-                self.driver.add_cookie(cookie)
-            
-            self.logger.info("Cookies cargadas")
-            return True
-        return False
+        try:
+            if self.cookies_file.exists():
+                with open(self.cookies_file, 'r') as f:
+                    cookies = json.load(f)
+                
+                loaded_count = 0
+                for cookie in cookies:
+                    try:
+                        self.driver.add_cookie(cookie)
+                        loaded_count += 1
+                    except Exception as e:
+                        # Algunas cookies pueden fallar al agregar (ej: dominios distintos)
+                        pass
+                
+                self.logger.info(f"✓ {loaded_count} cookies cargadas")
+                return loaded_count > 0
+            else:
+                self.logger.info("ℹ No hay archivo de cookies guardado")
+                return False
+        except Exception as e:
+            self.logger.warning(f"⚠ Error cargando cookies: {str(e)}")
+            return False
     
     def login(self, email: str, password: str) -> bool:
         """
@@ -115,28 +186,39 @@ class LinkedInScraper:
         """
         try:
             self.logger.info("Iniciando login en LinkedIn...")
-            self.driver.get("https://www.linkedin.com/login")
-            time.sleep(2)
             
             # Intentar cargar cookies primero
             if self.load_cookies():
-                self.driver.refresh()
-                time.sleep(3)
+                # Si hay cookies guardadas, ir directamente al feed (no a la página de login)
+                self.logger.info("Navegando al feed con cookies guardadas...")
+                self.driver.get("https://www.linkedin.com/feed/")
+                time.sleep(4)
                 
                 # Verificar si estamos logueados
                 if self.is_logged_in():
-                    self.logger.success("Login exitoso usando cookies guardadas")
+                    self.logger.success("✓ Login exitoso usando cookies guardadas")
                     return True
+                else:
+                    self.logger.warning("⚠ Cookies no válidas, realizando login manual...")
             
-            # Si no funcionaron las cookies, hacer login manual
-            self.logger.info("Realizando login manual...")
+            # Si no funcionaron las cookies, ir a login y hacer login manual
+            self.logger.info("Navegando a página de login...")
+            self.driver.get("https://www.linkedin.com/login")
+            time.sleep(2)
             
             # Ingresar email
-            email_input = WebDriverWait(self.driver, 10).until(
-                EC.presence_of_element_located((By.ID, "username"))
-            )
-            email_input.clear()
-            email_input.send_keys(email)
+            try:
+                email_input = WebDriverWait(self.driver, 10).until(
+                    EC.presence_of_element_located((By.ID, "username"))
+                )
+                email_input.clear()
+                email_input.send_keys(email)
+            except TimeoutException:
+                self.logger.error("❌ Campo de email no encontrado - ¿ya estás logueado?")
+                if self.is_logged_in():
+                    self.logger.success("✓ Ya estás logueado (no se necesitaba)")
+                    return True
+                return False
             
             # Ingresar password
             password_input = self.driver.find_element(By.ID, "password")
@@ -153,8 +235,8 @@ class LinkedInScraper:
             # Verificar si hay verificación de seguridad
             current_url = self.driver.current_url
             if "checkpoint" in current_url or "challenge" in current_url:
-                self.logger.warning("LinkedIn requiere verificación de seguridad")
-                self.logger.warning("Por favor completa la verificación manualmente en el navegador")
+                self.logger.warning("⚠ LinkedIn requiere verificación de seguridad")
+                self.logger.info("Por favor completa la verificación manualmente en el navegador")
                 
                 # Esperar hasta 2 minutos para verificación manual
                 for i in range(24):  # 24 * 5 = 120 segundos
@@ -162,29 +244,65 @@ class LinkedInScraper:
                     if self.is_logged_in():
                         break
                 else:
-                    self.logger.error("Timeout esperando verificación manual")
+                    self.logger.error("❌ Timeout - no se completó verificación manual")
                     return False
             
             # Guardar cookies si login exitoso
             if self.is_logged_in():
                 self.save_cookies()
-                self.logger.success("Login exitoso")
+                self.logger.success("✓ Login exitoso y cookies guardadas")
                 return True
             else:
-                self.logger.error("Login fallido")
+                self.logger.error("❌ Login fallido - no se pudo verificar sesión")
                 return False
                 
         except Exception as e:
-            self.logger.error(f"Error en login: {str(e)}")
+            self.logger.error(f"❌ Error en login: {str(e)}")
+            import traceback
+            self.logger.debug(traceback.format_exc())
             return False
     
     def is_logged_in(self) -> bool:
-        """Verifica si estamos logueados en LinkedIn"""
+        """Verifica si estamos logueados en LinkedIn (con múltiples estrategias)"""
         try:
-            # Buscar elemento que solo aparece cuando estás logueado
-            self.driver.find_element(By.CSS_SELECTOR, "a[href*='/feed/']")
-            return True
-        except NoSuchElementException:
+            # Estrategia 1: Buscar elemento único de usuario logueado
+            try:
+                self.driver.find_element(By.CSS_SELECTOR, "[data-test-id='identity-details-me']")
+                return True
+            except NoSuchElementException:
+                pass
+            
+            # Estrategia 2: Buscar el botón de "Me" (perfil)
+            try:
+                self.driver.find_element(By.CSS_SELECTOR, "a[href*='/feed/'] svg")
+                return True
+            except NoSuchElementException:
+                pass
+            
+            # Estrategia 3: Buscar link de feed
+            try:
+                self.driver.find_element(By.CSS_SELECTOR, "a[href*='/feed/']")
+                return True
+            except NoSuchElementException:
+                pass
+            
+            # Estrategia 4: Verificar URL - si no estamos en /login ni /checkpoint, probablemente estamos dentro
+            current_url = self.driver.current_url
+            if "/login" not in current_url and "/checkpoint" not in current_url and "/challenge" not in current_url:
+                # Esperar un poco extras a que cargue la página
+                time.sleep(2)
+                # Buscar indicador de que estamos en LinkedIn (no en error 404)
+                try:
+                    self.driver.find_element(By.TAG_NAME, "main")
+                    return True
+                except NoSuchElementException:
+                    pass
+            
+            # No estamos logueados
+            return False
+            
+        except Exception as e:
+            self.logger.debug(f"Error verificando login: {str(e)}")
             return False
     
     def search_jobs(self, keywords: str, location: str, num_jobs: int = 25, existing_job_ids: set = None) -> List[Dict[str, Any]]:
@@ -392,14 +510,15 @@ class LinkedInScraper:
                 self.logger.warning(f"    ✗ No se encontró URL")
                 return None
             
-            # Verificar Easy Apply haciendo click en el trabajo
-            has_easy_apply = self.check_easy_apply_in_detail(job_card)
+            # Verificar Easy Apply haciendo click en el trabajo (y extraer descripción)
+            has_easy_apply, description = self.check_easy_apply_in_detail(job_card)
             
             return {
                 'title': title,
                 'company': company or 'N/A',
                 'location': location or 'N/A',
                 'url': url,
+                'description': description or 'N/A',
                 'has_easy_apply': has_easy_apply,
                 'application_type': 'AUTO' if has_easy_apply else 'MANUAL',
                 'scraped_at': time.strftime("%Y-%m-%d %H:%M:%S")
@@ -409,21 +528,40 @@ class LinkedInScraper:
             self.logger.warning(f"    ✗ Error extrayendo datos: {str(e)}")
             return None
     
-    def check_easy_apply_in_detail(self, job_card) -> bool:
+    def check_easy_apply_in_detail(self, job_card) -> tuple:
         """
-        Hace click en el trabajo y verifica si tiene Easy Apply en el panel de detalles
+        Hace click en el trabajo, verifica si tiene Easy Apply, y extrae descripción
         
         Args:
             job_card: Elemento de la tarjeta de trabajo
         
         Returns:
-            True si tiene Easy Apply, False si no
+            Tupla (has_easy_apply: bool, description: str)
         """
         try:
             # Hacer click en la tarjeta para cargar detalles
             clickable = job_card.find_element(By.CSS_SELECTOR, "a.job-card-container__link")
             clickable.click()
             time.sleep(1.5)  # Esperar a que cargue el panel de detalles
+            
+            # Extraer descripción del trabajo
+            description = ""
+            description_selectors = [
+                "div.jobs-details__main-content div.show-more-less-html__markup",
+                "div.jobs-details-top-card__job-description",
+                "section[data-section-name='summary']",
+                "div.jobs-details__job-description"
+            ]
+            
+            for selector in description_selectors:
+                try:
+                    desc_elem = self.driver.find_element(By.CSS_SELECTOR, selector)
+                    description = clean_text(desc_elem.text)
+                    if description and len(description) > 100:
+                        self.logger.info(f"    📝 Descripción: {len(description)} caracteres")
+                        break
+                except NoSuchElementException:
+                    continue
             
             # Buscar el botón de "Solicitud sencilla" en el panel de detalles
             try:
@@ -439,15 +577,15 @@ class LinkedInScraper:
                 else:
                     self.logger.info(f"    ✗ No tiene Easy Apply")
                 
-                return has_easy_apply
+                return has_easy_apply, description
                 
             except NoSuchElementException:
                 self.logger.info(f"    ✗ No tiene Easy Apply (botón no encontrado)")
-                return False
+                return False, description
                 
         except Exception as e:
             self.logger.warning(f"    ⚠️ Error verificando Easy Apply: {str(e)}")
-            return False
+            return False, ""
     
     def close(self):
         """Cierra el driver"""

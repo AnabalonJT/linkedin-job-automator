@@ -1,0 +1,246 @@
+{
+  "candidate": {
+    "name": "JOSÉ TOMÁS ANABALÓN",
+    "current_title": "Ingeniero en Ciencias de la Computación - Desarrollador Full Stack & AI",
+    "professional_summary": "Ingeniero en Ciencias de la Computación con mención en Modelación Matemática Aplicada. 4+ años de experiencia en desarrollo full-stack, automatización e IA. Experiencia con Ruby on Rails, Django, Python, AWS y soluciones de machine learning. Residente en Santiago, Chile. Legalmente autorizado para trabajar en Chile.",
+    "location": "Santiago, Chile",
+    "work_authorization": "Legally authorized to work in Chile - No visa sponsorship required",
+    "email": "jtanabalon@miuandes.cl",
+    "phone": "+56 9 8393 1281",
+    "linkedin_url": "linkedin.com/in/jtanabalon",
+    "github_url": "anabalonjt.github.io/Portafolio"
+  },
+
+  "professional_experience": [
+    {
+      "company": "MakiMotion",
+      "position": "Desarrollador Full Stack",
+      "duration": "08/2025 - 09/2025",
+      "duration_months": 2,
+      "description": "Desarrollo y despliegue de aplicación web completa para gestión de pacientes de kinesiología (piso pélvico), actualmente en uso productivo por profesionales de la salud.",
+      "achievements": [
+        "Implementé sistema integral con autenticación de usuarios, CRUD de pacientes, gestión de citas médicas, fichas clínicas y panel administrativo completo en 6 semanas",
+        "Configuré despliegue automatizado en Render con base de datos PostgreSQL y CI/CD desde GitHub"
+      ],
+      "technologies": ["Django", "PostgreSQL", "HTML", "CSS", "JavaScript", "Render", "Git/GitHub"],
+      "team_size": null
+    },
+    {
+      "company": "KrConsulting",
+      "position": "Práctica Profesional - Automatización & Data",
+      "duration": "01/2025 - 03/2025",
+      "duration_months": 3,
+      "description": "Desarrollo de soluciones de automatización e inteligencia artificial para clientes corporativos de IBM (partner Watson X), implementando herramientas de IA generativa en flujos de trabajo empresariales.",
+      "achievements": [
+        "Diseñé arquitectura completa de solución LLM para automatizar revisión de contratos legales, identificando cláusulas incumplidas, fechas de renovación y riesgos contractuales",
+        "Diseñé y desplegué pipelines ETL para centralizar datos empresariales en Snowflake, reduciendo tiempo de generación de reportes de 4 horas a 15 minutos semanales (93% de mejora)"
+      ],
+      "technologies": ["Python", "Snowflake", "REST APIs", "BeautifulSoup", "Pandas", "IBM Watson X"],
+      "team_size": null
+    },
+    {
+      "company": "Mt&Coco (Estudio de Tatuajes)",
+      "position": "Desarrollador Full Stack Freelance",
+      "duration": "12/2022 - 05/2023",
+      "duration_months": 6,
+      "description": "Desarrollo de landing page completa con sistema de formularios para estudio de tatuajes, integrando funcionalidades frontend y backend.",
+      "achievements": [
+        "Automaticé notificaciones por email tras envío de formularios, incluyendo información del cliente e imágenes de referencia adjuntas",
+        "Implementé manejo de carga de imágenes y almacenamiento en base de datos, facilitando consulta de referencias para tatuadores"
+      ],
+      "technologies": ["HTML", "CSS", "JavaScript", "PHP", "MySQL", "Hostinger"],
+      "team_size": null
+    },
+    {
+      "company": "KitCrea (Dark Kitchen)",
+      "position": "Desarrollador Frontend Freelance",
+      "duration": "07/2023 - 08/2023",
+      "duration_months": 2,
+      "description": "Desarrollo de sitio web corporativo en WordPress para empresa de Dark Kitchens, mostrando espacios disponibles y generando leads de clientes potenciales.",
+      "achievements": [
+        "Diseñé y desarrollé vistas personalizadas basadas en requerimientos del cliente, destacando características de cocinas compartidas",
+        "Implementé diseño responsivo optimizado para conversión de visitantes en clientes potenciales"
+      ],
+      "technologies": ["WordPress", "HTML", "CSS", "PHP"],
+      "team_size": null
+    },
+    {
+      "company": "C&V Paisajismo",
+      "position": "Desarrollador Full Stack Freelance",
+      "duration": "12/2021 - 04/2022",
+      "duration_months": 5,
+      "description": "Desarrollo de aplicación web completa para gestión y coordinación de jardineros en terreno, eliminando procesos manuales y centralizando información operativa.",
+      "achievements": [
+        "Implementé sistema de asignación de tareas con calendario reduciendo tiempo de gestión administrativa en ~70%",
+        "Desarrollé funcionalidad de carga de imágenes integrada con AWS S3 para documentación fotográfica y validación de calidad en tiempo real",
+        "Automaticé generación de PDFs para cobros a clientes basados en tareas completadas"
+      ],
+      "technologies": ["Ruby on Rails", "PostgreSQL", "AWS S3", "Heroku"],
+      "team_size": "10+ jardineros gestionados"
+    },
+    {
+      "company": "Tinet",
+      "position": "Practicante - Desarrollo de Software",
+      "duration": "12/2019 - 02/2020",
+      "duration_months": 3,
+      "description": "Diseño y desarrollo de aplicación web para evaluación de equipos ágiles, permitiendo medición sistemática de desempeño y productividad.",
+      "achievements": [
+        "Implementé sistema de evaluación individual con métricas personalizables y cálculo automatizado de rendimiento de equipo",
+        "Aprendí metodologías ágiles (Scrum) en entorno profesional"
+      ],
+      "technologies": ["Angular", "Spring Boot", "JHipster", "PostgreSQL"],
+      "team_size": null
+    }
+  ],
+
+  "education": [
+    {
+      "institution": "Universidad de los Andes",
+      "degree": "Ingeniería Civil",
+      "field": "Ciencias de la Computación con Mención en Modelación Matemática Aplicada",
+      "year_completed": 2025,
+      "additional_info": "Marzo 2016 – Mayo 2025. Formación integral en ciencias de la computación con énfasis en modelación matemática, algoritmos, estructuras de datos, desarrollo de software y machine learning."
+    },
+    {
+      "institution": "FHWien der WKW",
+      "degree": "Intercambio Académico",
+      "field": "Ciencias de la Computación y Desarrollo de Software",
+      "year_completed": 2019,
+      "additional_info": "Febrero – Agosto 2019. Viena, Austria. Semestre de intercambio internacional en contexto europeo."
+    },
+    {
+      "institution": "The Newland School",
+      "degree": "Educación Básica y Media",
+      "field": null,
+      "year_completed": 2015,
+      "additional_info": "Marzo 2001 – Diciembre 2015. Santiago, Chile."
+    }
+  ],
+
+  "technical_skills": {
+    "programming_languages": [
+      {"skill": "Python", "proficiency": "Expert", "years": 5},
+      {"skill": "Ruby", "proficiency": "Advanced", "years": 3},
+      {"skill": "JavaScript (ES6+)", "proficiency": "Advanced", "years": null},
+      {"skill": "Java", "proficiency": "Intermediate", "years": null},
+      {"skill": "C", "proficiency": "Intermediate", "years": null},
+      {"skill": "C++", "proficiency": "Intermediate", "years": null},
+      {"skill": "C#", "proficiency": "Intermediate", "years": null},
+      {"skill": "Kotlin", "proficiency": "Intermediate", "years": null},
+      {"skill": "Bash/Shell scripting", "proficiency": "Intermediate", "years": null}
+    ],
+    "frameworks_libraries": [
+      {"name": "Ruby on Rails", "years": 3, "proficiency": "Advanced"},
+      {"name": "Django", "years": 2, "proficiency": "Advanced"},
+      {"name": "Spring Boot", "years": 1, "proficiency": "Intermediate"},
+      {"name": "Angular", "years": 1, "proficiency": "Intermediate"},
+      {"name": "PyTorch", "years": 2, "proficiency": "Advanced"},
+      {"name": "TensorFlow", "years": 2, "proficiency": "Advanced"},
+      {"name": "NumPy", "years": 4, "proficiency": "Advanced"},
+      {"name": "Pandas", "years": 4, "proficiency": "Advanced"},
+      {"name": "Scikit-learn", "years": null, "proficiency": "Intermediate"},
+      {"name": "Selenium", "years": 1, "proficiency": "Advanced"},
+      {"name": "BeautifulSoup", "years": 1, "proficiency": "Intermediate"},
+      {"name": "n8n", "years": 1, "proficiency": "Advanced"},
+      {"name": "REST APIs", "years": 5, "proficiency": "Advanced"},
+      {"name": "GraphQL", "years": 1, "proficiency": "Intermediate"},
+      {"name": "WebSockets", "years": 2, "proficiency": "Intermediate"}
+    ],
+    "databases": [
+      {"name": "PostgreSQL", "proficiency": "Advanced"},
+      {"name": "MySQL", "proficiency": "Advanced"},
+      {"name": "Snowflake", "proficiency": "Intermediate"},
+      {"name": "Cassandra", "proficiency": "Beginner"}
+    ],
+    "devops_tools": [
+      {"name": "Docker", "proficiency": "Intermediate"},
+      {"name": "Git/GitHub", "proficiency": "Advanced"},
+      {"name": "CI/CD (GitHub Actions)", "proficiency": "Intermediate"},
+      {"name": "Heroku", "proficiency": "Intermediate"},
+      {"name": "Render", "proficiency": "Intermediate"}
+    ],
+    "cloud_platforms": [
+      {"platform": "AWS", "services": ["S3", "Lambda", "EMR", "IoT"], "certification": null}
+    ]
+  },
+
+  "soft_skills": [
+    "Levantamiento de requerimientos",
+    "Traducción de necesidades de negocio en soluciones técnicas",
+    "Trabajo en equipo",
+    "Tutorías y mentoría académica",
+    "Metodologías ágiles (Scrum)"
+  ],
+
+  "certifications": [
+    {
+      "name": "TOEFL ITP",
+      "issuer": "ETS",
+      "year": null,
+      "credential_id": null,
+      "credential_url": null
+    },
+    {
+      "name": "Cambridge FCE (First Certificate in English)",
+      "issuer": "Cambridge Assessment English",
+      "year": null,
+      "credential_id": null,
+      "credential_url": null
+    },
+    {
+      "name": "Introduction to Bionic Prostheses (Webinar)",
+      "issuer": "P4HBionics",
+      "year": 2024,
+      "credential_id": null,
+      "credential_url": null
+    }
+  ],
+
+  "languages": [
+    {"language": "Español", "proficiency": "Native"},
+    {"language": "Inglés", "proficiency": "B2 C1 (TOEFL ITP, Cambridge FCE)"},
+    {"language": "Alemán", "proficiency": "A1 Basic"}
+  ],
+
+  "projects": [
+    {
+      "name": "Trabajo de Fin de Grado: Comparación de Modelos Generativos de Imágenes Aplicados al Diseño de Moda",
+      "description": "Investigación y comparación de 9 variantes de modelos generativos (GANs, Diffusion Models, Transformers) para generación de vestidos desde bocetos, evaluando viabilidad de IA en flujo creativo real.",
+      "role": "Investigador principal / Desarrollador",
+      "technologies": ["PyTorch", "TensorFlow", "Python", "NumPy", "Pandas", "BeautifulSoup", "CUDA"],
+      "outcome": "Pipeline con 55,000 pares boceto-vestido para entrenamiento. Diffusion Models (DDIM, ControlNet) lograron mejores métricas globales. Dataset de 18,000 imágenes de alta calidad curado mediante web scraping.",
+      "link": null
+    },
+    {
+      "name": "LinkedIn Job Application Automator",
+      "description": "Bot completo de automatización de postulaciones laborales en LinkedIn con workflow end-to-end orquestado con n8n, sistema de tracking y notificaciones vía Telegram.",
+      "role": "Desarrollador principal",
+      "technologies": ["n8n", "Python", "Selenium", "Google Sheets API", "Telegram API", "Docker"],
+      "outcome": "Reducción de tiempo de aplicación de 10 minutos por oferta a menos de 30 segundos (95% de mejora). En producción procesando 20+ ofertas diarias con 100+ postulaciones exitosas completadas.",
+      "link": null
+    }
+  ],
+
+  "additional_info": {
+    "volunteer_experience": [
+      {
+        "role": "Ayudante Corrector - Aplicaciones Web",
+        "institution": "Universidad de los Andes",
+        "duration": "Marzo – Julio 2021",
+        "description": "Corrección de actividades evaluadas y exámenes, feedback detallado a estudiantes, soporte académico técnico."
+      },
+      {
+        "role": "Instructor Par - Introducción a la Mecánica",
+        "institution": "Universidad de los Andes",
+        "duration": "Septiembre – Noviembre 2018",
+        "description": "Tutorías personalizadas a 2 estudiantes con dificultades académicas, diseño de plan de estudio adaptado, logrando mejora significativa en rendimiento académico."
+      }
+    ],
+    "publications": [],
+    "speaking_engagements": [],
+    "awards": [],
+    "interests": ["Gimnasio", "Senderismo", "Fútbol", "Tenis", "Pádel", "Videojuegos", "Malabarismo"],
+    "date_of_birth": "11 de marzo de 1997",
+    "nationality": "Chilena"
+  }
+}
