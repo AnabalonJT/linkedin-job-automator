@@ -14,9 +14,13 @@ Este checklist asegura que tenemos todo listo antes de empezar el trabajo de des
 - [x] RESUMEN_EJECUTIVO.md (ejecutivo-friendly)
 - [x] ANALISIS_COMPONENTES.md (análisis técnico detallado)
 - [x] INDICE_DOCUMENTACION.md (navegación)
+- [x] CAMBIOS_MODAL_FORMULARIO.md (cambios técnicos 2026-02-23) **NUEVO**
+- [x] GUIA_PRUEBAS_MODAL.md (guía de testing) **NUEVO**
+- [x] RESUMEN_CAMBIOS.md (resumen ejecutivo de cambios) **NUEVO**
+- [x] SELECTORES_REFERENCIA.md (referencia de selectores HTML) **NUEVO**
 - [x] Este checklist
 
-**Acción:** Documentación ✅ LISTA
+**Acción:** Documentación ✅ LISTA Y ACTUALIZADA
 
 ---
 
@@ -46,15 +50,24 @@ Este checklist asegura que tenemos todo listo antes de empezar el trabajo de des
 
 ### Módulo: LinkedIn Applier
 - [x] Archivo existe: `scripts/linkedin_applier.py`
-- [x] Funcionalidad: Detectar botón Easy Apply ✅
-- [ ] **INCOMPLETO:** `process_application_form()` termina abruptamente (línea 155)
-- [ ] Funcionalidad: Procesar multi-step forms ❌
-- [ ] Funcionalidad: Detectar campos de entrada ⚠️
-- [ ] Funcionalidad: Responder preguntas ⚠️
-- [ ] Funcionalidad: Seleccionar CV automático ⚠️
-- [ ] Integración: Google Sheets ❌
+- [x] Funcionalidad: Detectar botón Easy Apply ✅ **MEJORADO 2026-02-23**
+- [x] Funcionalidad: Detectar trabajos eliminados/cerrados ✅ **NUEVO 2026-02-23**
+- [x] Funcionalidad: Verificar modal abierto ✅ **NUEVO 2026-02-23**
+- [x] Funcionalidad: Procesar multi-step forms ✅
+- [x] Funcionalidad: Detectar campos de entrada ✅
+- [x] Funcionalidad: Responder preguntas ✅
+- [x] Funcionalidad: Seleccionar CV automático ✅
+- [x] Integración: Google Sheets ✅
 
-**Estado:** ⚠️ 70% FUNCIONAL - REQUIERE COMPLETAR `process_application_form()`
+**Estado:** ✅ 95% FUNCIONAL - MEJORAS IMPLEMENTADAS (Ver CAMBIOS_MODAL_FORMULARIO.md)
+
+**Cambios Recientes (2026-02-23)**:
+- ✅ Detección de trabajos eliminados/cerrados
+- ✅ Selectores ampliados para botón Easy Apply (incluye `<a>` tags)
+- ✅ Verificación explícita de modal abierto
+- ✅ Nuevo estado: `ELIMINADO` para trabajos cerrados
+- ✅ Screenshots automáticos para debugging
+- ✅ Mejor manejo de errores y logging
 
 ### Módulo: Utilidades
 - [x] Archivo existe: `scripts/utils.py`

@@ -134,7 +134,10 @@ class GoogleSheetsManager:
             status = result.get('status', 'PENDIENTE')
             cv_used = result.get('cv_used', 'N/A') or 'N/A'
             
-            if result.get('error'):
+            # Manejar estado ELIMINADO (trabajo cerrado/ya no acepta postulaciones)
+            if status == 'ELIMINADO':
+                notes = result.get('error', 'Trabajo eliminado o cerrado')
+            elif result.get('error'):
                 notes = result['error']
             
             if result.get('questions_encountered'):

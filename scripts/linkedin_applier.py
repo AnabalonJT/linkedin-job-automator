@@ -56,7 +56,7 @@ class LinkedInApplier:
             'job_title': job['title'],
             'company': job['company'],
             'success': False,
-            'status': 'PENDING',  # PENDING, APPLIED, MANUAL, ERROR
+            'status': 'PENDING',  # Estados: PENDING, APPLIED, MANUAL, ERROR, ELIMINADO
             'error': None,
             'questions_encountered': [],
             'cv_used': None
@@ -72,14 +72,42 @@ class LinkedInApplier:
             self.driver.execute_script("window.scrollTo(0, 300);")
             time.sleep(1)
             
-            # Buscar botón Easy Apply con múltiples selectores
+            # Verificar si el trabajo ya no acepta postulaciones (eliminado/cerrado)
+            try:
+                # Buscar indicadores de trabajo cerrado
+                closed_indicators = [
+                    "No longer accepting applications",
+                    "Ya no se aceptan solicitudes",
+                    "This job is no longer available",
+                    "Este trabajo ya no está disponible",
+                    "Closed",
+                    "Cerrado"
+                ]
+                
+                page_text = self.driver.find_element(By.TAG_NAME, "body").text
+                is_closed = any(indicator.lower() in page_text.lower() for indicator in closed_indicators)
+                
+                if is_closed:
+                    result['error'] = "Trabajo ya no acepta postulaciones (eliminado/cerrado)"
+                    result['status'] = 'ELIMINADO'
+                    self.logger.warning("✗ Trabajo cerrado - ya no acepta postulaciones")
+                    return result
+            except Exception:
+                pass  # Continuar si no se puede verificar
+            
+            # Buscar botón Easy Apply con múltiples selectores (incluyendo <a> tags)
             easy_apply_button = None
             selectors = [
+                # Botones tradicionales
                 "button.jobs-apply-button",
                 "button[aria-label*='Solicitud sencilla']",
                 "button[aria-label*='Easy Apply']",
                 "button#jobs-apply-button-id",
-                "button[data-live-test-job-apply-button]"
+                "button[data-live-test-job-apply-button]",
+                # Links que funcionan como botones (caso común en LinkedIn)
+                "a[aria-label*='Solicitud sencilla']",
+                "a[aria-label*='Easy Apply']",
+                "a.jobs-apply-button"
             ]
             
             for selector in selectors:
@@ -94,7 +122,20 @@ class LinkedInApplier:
                     continue
             
             if not easy_apply_button:
+                # Verificar si es porque el trabajo está cerrado o no tiene Easy Apply
+                try:
+                    # Buscar botón "Postular" externo (no Easy Apply)
+                    external_apply = self.driver.find_elements(By.CSS_SELECTOR, "button[aria-label*='Postular'], a[aria-label*='Apply']")
+                    if external_apply:
+                        result['error'] = "Requiere postulación externa (no Easy Apply)"
+                        result['status'] = 'MANUAL'
+                        self.logger.warning("✗ Trabajo requiere postulación externa")
+                        return result
+                except Exception:
+                    pass
+                
                 result['error'] = "No se encontró botón Easy Apply"
+                result['status'] = 'MANUAL'
                 self.logger.warning("✗ No se encontró botón Easy Apply con ningún selector")
                 
                 # Guardar screenshot para debug
@@ -121,6 +162,43 @@ class LinkedInApplier:
                 self.logger.warning(f"  Click normal falló, intentando con JavaScript...")
                 self.driver.execute_script("arguments[0].click();", easy_apply_button)
                 time.sleep(3)
+            
+            # Verificar que el modal se haya abierto
+            try:
+                modal_selectors = [
+                    "div[data-test-modal-id='easy-apply-modal']",
+                    "div.jobs-easy-apply-modal",
+                    "div[role='dialog'][aria-labelledby*='apply']"
+                ]
+                
+                modal_found = False
+                for modal_selector in modal_selectors:
+                    try:
+                        modal = WebDriverWait(self.driver, 5).until(
+                            EC.presence_of_element_located((By.CSS_SELECTOR, modal_selector))
+                        )
+                        if modal and modal.is_displayed():
+                            modal_found = True
+                            self.logger.info("  ✓ Modal de aplicación abierto correctamente")
+                            break
+                    except TimeoutException:
+                        continue
+                
+                if not modal_found:
+                    result['error'] = "Modal de aplicación no se abrió"
+                    result['status'] = 'ERROR'
+                    self.logger.warning("✗ Modal no se abrió después del click")
+                    
+                    # Screenshot para debug
+                    screenshot_path = Path(f"data/logs/debug_no_modal_{job['title'][:30]}.png")
+                    screenshot_path.parent.mkdir(parents=True, exist_ok=True)
+                    self.driver.save_screenshot(str(screenshot_path))
+                    
+                    return result
+                    
+            except Exception as e:
+                self.logger.warning(f"  No se pudo verificar modal: {str(e)}")
+                # Continuar de todas formas, puede que esté abierto
             
             # Procesar formulario multi-paso
             aplicacion_exitosa = self.process_application_form(job, result)
