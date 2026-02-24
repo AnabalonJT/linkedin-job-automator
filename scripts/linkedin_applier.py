@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
 LinkedIn Job Applier
-Aplica automáticamente a trabajos con Easy Apply
+Aplica automáticamente a trabajos con Easy Apply usando IA
 """
 
 import time
 import json
+import random
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from selenium.webdriver.common.by import By
@@ -14,7 +15,16 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from selenium.webdriver.common.keys import Keys
 
-from utils import Config, Logger, select_cv_by_keywords
+from utils import Config, Logger
+from models import ApplicationResult, ProcessedJob, ApplicationDecision
+from modal_detector import ModalDetector
+from form_field_detector import FormFieldDetector
+from cv_selector import CVSelector
+from question_handler import QuestionHandler
+from confidence_system import ConfidenceSystem
+from state_manager import StateManager
+from google_sheets_updater import GoogleSheetsUpdater
+from telegram_notifier import TelegramNotifierWithAccumulation
 
 # Optional: Telegram notifier (graceful if env not configured)
 try:
@@ -24,18 +34,754 @@ except Exception:
 
 
 class LinkedInApplier:
-    """Aplicador automático a trabajos de LinkedIn"""
+    """Aplicador automático a trabajos de LinkedIn con IA"""
     
     def __init__(self, driver, config: Config, logger: Logger):
         self.driver = driver
         self.config = config
         self.logger = logger
         
-        # Cargar respuestas configuradas
+        # Cargar respuestas configuradas (legacy, para fallback)
         self.answers = config.load_json_config('respuestas_comunes.json')
         
         # Cargar rutas de CVs
         self.cv_paths = config.get_cv_paths()
+        
+        # Initialize new components with correct signatures
+        self.modal_detector = ModalDetector(poll_interval=0.5)
+        self.form_detector = FormFieldDetector()
+        self.cv_selector = CVSelector(api_key=config.get_env_var('OPENROUTER_API_KEY'))
+        self.question_handler = QuestionHandler(
+            api_key=config.get_env_var('OPENROUTER_API_KEY'),
+            common_answers_path="config/respuestas_comunes.json"
+        )
+        self.confidence_system = ConfidenceSystem(
+            high_threshold=float(config.get_env_var('HIGH_THRESHOLD', '0.85')),
+            low_threshold=float(config.get_env_var('LOW_THRESHOLD', '0.65'))
+        )
+        self.state_manager = StateManager(state_file="data/logs/application_state.json")
+        
+        # Initialize Google Sheets updater (optional)
+        self.sheets_updater = None
+        try:
+            sheets_id = config.get_env_var('GOOGLE_SHEETS_ID')
+            credentials_path = 'config/google_credentials.json'
+            if sheets_id and Path(credentials_path).exists():
+                self.sheets_updater = GoogleSheetsUpdater(credentials_path, sheets_id)
+                logger.info('✓ Google Sheets updater initialized')
+        except Exception as e:
+            logger.warning(f'Google Sheets not available: {e}')
+        
+        # Initialize Telegram notifier with accumulation
+        self.telegram_notifier = None
+        try:
+            self.telegram_notifier = TelegramNotifierWithAccumulation()
+            logger.info('✓ Telegram notifier initialized')
+        except Exception as e:
+            logger.warning(f'Telegram not configured: {e}')
+    
+    def _update_sheets(self, job: Dict[str, Any], result: Dict[str, Any]):
+        """
+        Helper method to update Google Sheets with proper parameter extraction.
+        
+        Args:
+            job: Job dictionary with title, company, url, location
+            result: Result dictionary with status, cv_used, error, questions_answered, confidence_score
+        """
+        if not self.sheets_updater:
+            return
+        
+        try:
+            # Extract questions answered count
+            questions_answered = len(result.get('questions_answered', []))
+            
+            # Calculate average confidence
+            average_confidence = 0.0
+            if result.get('confidence_score'):
+                average_confidence = result['confidence_score']
+            elif result.get('questions_answered'):
+                confidences = [qa.get('confidence', 0.0) for qa in result['questions_answered']]
+                if confidences:
+                    average_confidence = sum(confidences) / len(confidences)
+            
+            # Build notes
+            notes = result.get('error', '')
+            if result.get('low_confidence_questions'):
+                low_conf_questions = result['low_confidence_questions']
+                questions_text = ', '.join(low_conf_questions[:3])
+                if len(low_conf_questions) > 3:
+                    questions_text += f' (y {len(low_conf_questions) - 3} más)'
+                notes = f"{notes}. Preguntas con baja confianza: {questions_text}" if notes else f"Preguntas con baja confianza: {questions_text}"
+            
+            # Call with correct parameters
+            self.sheets_updater.update_application(
+                job_id=job.get('id', ''),
+                job_url=job['url'],
+                job_title=job['title'],
+                company=job['company'],
+                location=job.get('location', 'N/A'),
+                status=result['status'],
+                cv_used=result.get('cv_used'),
+                notes=notes,
+                questions_answered=questions_answered,
+                average_confidence=average_confidence
+            )
+        except Exception as e:
+            self.logger.warning(f"Error updating Google Sheets: {e}")
+    
+    def _is_job_unavailable(self) -> bool:
+        """
+        Verifica si el trabajo ya no acepta postulaciones
+        
+        Returns:
+            True si el trabajo está cerrado/no disponible
+        """
+        try:
+            closed_indicators = [
+                "No longer accepting applications",
+                "Ya no se aceptan solicitudes",
+                "This job is no longer available",
+                "Este trabajo ya no está disponible",
+                "Closed",
+                "Cerrado"
+            ]
+            
+            page_text = self.driver.find_element(By.TAG_NAME, "body").text
+            return any(indicator.lower() in page_text.lower() for indicator in closed_indicators)
+        except Exception:
+            return False
+    
+    def _expand_job_description(self, job: Dict[str, Any]) -> str:
+        """
+        Expande la descripción completa del trabajo si hay botón "Ver más"
+        
+        Args:
+            job: Datos del trabajo
+        
+        Returns:
+            Descripción completa del trabajo
+        """
+        try:
+            # Buscar botones de expansión
+            expand_selectors = [
+                "button[aria-label*='Ver más']",
+                "button[aria-label*='Show more']",
+                "button[aria-label*='See more']",
+                "button.jobs-description__footer-button"
+            ]
+            
+            for selector in expand_selectors:
+                try:
+                    expand_button = self.driver.find_element(By.CSS_SELECTOR, selector)
+                    if expand_button.is_displayed():
+                        # Click usando JavaScript para mayor confiabilidad
+                        self.driver.execute_script("arguments[0].click();", expand_button)
+                        self.logger.info("  ✓ Descripción expandida")
+                        time.sleep(2)  # Esperar a que cargue
+                        break
+                except NoSuchElementException:
+                    continue
+            
+            # Extraer descripción completa
+            description_element = self.driver.find_element(By.CSS_SELECTOR, ".jobs-description__content, .jobs-description")
+            full_description = description_element.text
+            
+            self.logger.info(f"  ✓ Descripción extraída ({len(full_description)} caracteres)")
+            return full_description
+            
+        except Exception as e:
+            self.logger.warning(f"  No se pudo expandir descripción: {e}")
+            return job.get('description', '')
+    
+    def _click_easy_apply_button(self, result: Dict[str, Any]) -> bool:
+        """
+        Busca y hace clic en el botón Easy Apply
+        
+        Args:
+            result: Diccionario de resultado (se modifica)
+        
+        Returns:
+            True si se hizo clic exitosamente
+        """
+        try:
+            easy_apply_button = None
+            selectors = [
+                # Botones tradicionales
+                "button.jobs-apply-button",
+                "button[aria-label*='Solicitud sencilla']",
+                "button[aria-label*='Easy Apply']",
+                "button#jobs-apply-button-id",
+                "button[data-live-test-job-apply-button]",
+                # Links que funcionan como botones
+                "a[aria-label*='Solicitud sencilla']",
+                "a[aria-label*='Easy Apply']",
+                "a.jobs-apply-button"
+            ]
+            
+            for selector in selectors:
+                try:
+                    easy_apply_button = WebDriverWait(self.driver, 5).until(
+                        EC.presence_of_element_located((By.CSS_SELECTOR, selector))
+                    )
+                    if easy_apply_button:
+                        self.logger.info(f"  ✓ Botón Easy Apply encontrado con: {selector}")
+                        break
+                except TimeoutException:
+                    continue
+            
+            if not easy_apply_button:
+                # Verificar si requiere postulación externa
+                try:
+                    external_apply = self.driver.find_elements(By.CSS_SELECTOR, "button[aria-label*='Postular'], a[aria-label*='Apply']")
+                    if external_apply:
+                        result['error'] = "Requiere postulación externa (no Easy Apply)"
+                        result['status'] = 'MANUAL'
+                        self.logger.warning("✗ Trabajo requiere postulación externa")
+                        return False
+                except Exception:
+                    pass
+                
+                result['error'] = "No se encontró botón Easy Apply"
+                result['status'] = 'MANUAL'
+                self.logger.warning("✗ No se encontró botón Easy Apply")
+                
+                # Guardar screenshot para debug
+                self._save_debug_screenshot("no_easy_apply_button")
+                
+                return False
+            
+            # Click en el botón/link
+            # Guardar URL antes del clic
+            url_before = self.driver.current_url
+            is_link = easy_apply_button.tag_name == 'a'
+            
+            try:
+                self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", easy_apply_button)
+                time.sleep(1)
+                
+                # Si es un link, intentar navegar directamente a la URL
+                if is_link:
+                    href = easy_apply_button.get_attribute('href')
+                    if href:
+                        self.logger.info(f"  → Es un link, navegando a: {href[:80]}...")
+                        self.driver.get(href)
+                        time.sleep(3)
+                        self.logger.info(f"  ✓ Navegación completada")
+                    else:
+                        # Si no tiene href, hacer clic normal
+                        easy_apply_button.click()
+                        time.sleep(3)
+                else:
+                    # Es un botón, hacer clic normal
+                    easy_apply_button.click()
+                    self.logger.info("  ✓ Click en Easy Apply realizado")
+                    time.sleep(3)
+                    
+            except Exception as e:
+                # Fallback a JavaScript
+                self.logger.warning(f"  Click/navegación falló, usando JavaScript...")
+                if is_link:
+                    href = easy_apply_button.get_attribute('href')
+                    if href:
+                        self.driver.execute_script(f"window.location.href = '{href}';")
+                    else:
+                        self.driver.execute_script("arguments[0].click();", easy_apply_button)
+                else:
+                    self.driver.execute_script("arguments[0].click();", easy_apply_button)
+                time.sleep(3)
+            
+            # Verificar si la URL cambió
+            url_after = self.driver.current_url
+            if url_after != url_before:
+                self.logger.info(f"  ✓ URL cambió después del clic")
+                self.logger.info(f"    Antes: {url_before[:80]}...")
+                self.logger.info(f"    Después: {url_after[:80]}...")
+            else:
+                self.logger.info(f"  → URL no cambió (modal overlay esperado)")
+            
+            return True
+            
+        except Exception as e:
+            result['error'] = f"Error haciendo clic en Easy Apply: {str(e)}"
+            result['status'] = 'ERROR'
+            self.logger.error(f"  ✗ {result['error']}")
+            return False
+    
+    def _save_debug_screenshot(self, suffix: str):
+        """Guarda screenshot para debugging"""
+        try:
+            screenshot_path = Path(f"data/logs/debug_{suffix}_{int(time.time())}.png")
+            screenshot_path.parent.mkdir(parents=True, exist_ok=True)
+            self.driver.save_screenshot(str(screenshot_path))
+            self.logger.info(f"  Screenshot guardado: {screenshot_path}")
+        except Exception as e:
+            self.logger.warning(f"  No se pudo guardar screenshot: {e}")
+    
+    def _save_debug_html(self, job: Dict[str, Any], suffix: str):
+        """Guarda HTML para debugging"""
+        try:
+            html_content = self.driver.execute_script("return document.body.innerHTML;")
+            html_path = Path(f"data/logs/debug_{suffix}_{job['title'][:30]}_{int(time.time())}.html")
+            html_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(html_path, 'w', encoding='utf-8') as f:
+                f.write(html_content)
+            self.logger.info(f"  HTML guardado: {html_path}")
+        except Exception as e:
+            self.logger.warning(f"  No se pudo guardar HTML: {e}")
+    
+    def _process_application_form_with_ai(
+        self, 
+        job: Dict[str, Any], 
+        result: Dict[str, Any], 
+        modal_element,
+        cv_recommendation,
+        full_description: str
+    ) -> bool:
+        """
+        Procesa el formulario de aplicación multi-paso usando IA
+        
+        Args:
+            job: Datos del trabajo
+            result: Diccionario de resultado (se modifica)
+            modal_element: Elemento del modal
+            cv_recommendation: Recomendación de CV de la IA
+            full_description: Descripción completa del trabajo
+        
+        Returns:
+            True si se completó exitosamente
+        """
+        max_steps = 10
+        current_step = 0
+        questions_answered = []
+        
+        # CV context para la IA (cargar desde archivo o config)
+        cv_context = self._load_cv_context(cv_recommendation)
+        
+        while current_step < max_steps:
+            current_step += 1
+            self.logger.info(f"  Paso {current_step}...")
+            time.sleep(2)
+            
+            # 1. Detectar campos del formulario
+            fields = self.form_detector.detect_fields(modal_element)
+            self.logger.info(f"  → Detectados {len(fields)} campos en el formulario")
+            
+            # Log cada campo detectado
+            for field in fields:
+                self.logger.info(f"    Campo: tipo={field.field_type}, propósito={field.purpose}")
+            
+            # 2. Llenar campos con IA
+            for field in fields:
+                # Skip si ya tiene valor
+                if field.element.get_attribute('value'):
+                    continue
+                
+                # Manejar upload de CV
+                if field.field_type == 'file':
+                    self._handle_cv_upload_with_ai(field, cv_recommendation, result)
+                    continue
+                
+                # Para otros campos, usar IA para responder
+                question_text = field.purpose or field.label or field.placeholder
+                
+                if not question_text:
+                    self.logger.warning(f"    Campo sin propósito identificable, saltando...")
+                    continue
+                
+                # Obtener respuesta de la IA
+                answer_data = self.question_handler.answer_question(
+                    question=question_text,
+                    field_type=field.field_type,
+                    cv_context=cv_context,
+                    available_options=field.options
+                )
+                
+                if answer_data:
+                    # Log pregunta y respuesta
+                    self.logger.info(f"    Pregunta: {question_text[:50]}...")
+                    self.logger.info(f"    Respuesta: {answer_data.answer} | Confianza: {answer_data.confidence:.2f}")
+                    self.logger.info(f"    Razón: {answer_data.reasoning}")
+                    
+                    # Llenar campo
+                    success = self._fill_field_with_answer(field, answer_data)
+                    
+                    if success:
+                        questions_answered.append({
+                            'question': question_text,
+                            'answer': answer_data.answer,
+                            'confidence': answer_data.confidence,
+                            'reasoning': answer_data.reasoning
+                        })
+                    else:
+                        self.logger.warning(f"    ✗ No se pudo llenar campo")
+                        # Guardar screenshot para debug
+                        self._save_debug_screenshot(f"field_fill_failure_step{current_step}")
+                else:
+                    self.logger.warning(f"    ? No se pudo obtener respuesta de IA para: {question_text[:50]}...")
+            
+            # 3. Buscar y hacer clic en botón siguiente/enviar
+            time.sleep(1)
+            
+            button_result = self._click_next_or_submit_button()
+            
+            if not button_result['found']:
+                self.logger.warning("  ⚠ No se encontró botón de acción")
+                result['error'] = f"No se encontró botón en paso {current_step}"
+                result['status'] = 'MANUAL'
+                result['questions_answered'] = questions_answered
+                return False
+            
+            self.logger.info(f"  ✓ Click en botón: '{button_result.get('button_text', 'Unknown')}'")
+            time.sleep(2)
+            
+            # 4. Si era botón de envío, evaluar confianza y decidir
+            if button_result.get('is_submit'):
+                self.logger.info("  → Botón de envío detectado, evaluando confianza...")
+                
+                # Convertir a QuestionAnswer objects para el sistema de confianza
+                from models import QuestionAnswer
+                qa_objects = [
+                    QuestionAnswer(
+                        question=qa['question'],
+                        answer=qa['answer'],
+                        confidence=qa['confidence'],
+                        reasoning=qa['reasoning'],
+                        sources=[]
+                    )
+                    for qa in questions_answered
+                ]
+                
+                # Evaluar confianza
+                decision = self.confidence_system.evaluate_application(qa_objects)
+                
+                result['confidence_score'] = decision.overall_confidence
+                result['questions_answered'] = questions_answered
+                
+                self.logger.info(f"  → Decisión: {decision.action} (confianza: {decision.overall_confidence:.2f})")
+                self.logger.info(f"    Razón: {decision.reasoning}")
+                
+                if decision.action == 'SUBMIT':
+                    # Enviar aplicación
+                    self.logger.success("  ✓ Confianza alta - Enviando aplicación")
+                    result['status'] = 'APPLIED'
+                    result['success'] = True
+                    return True
+                    
+                elif decision.action == 'UNCERTAIN':
+                    # Enviar pero marcar como inseguro
+                    self.logger.warning("  ⚠ Confianza media - Enviando pero marcando como INSEGURO")
+                    result['status'] = 'INSEGURO'
+                    result['success'] = True
+                    result['low_confidence_questions'] = decision.low_confidence_questions
+                    return True
+                    
+                else:  # MANUAL
+                    # No enviar, requiere revisión manual
+                    self.logger.warning("  ✗ Confianza baja - Requiere revisión manual")
+                    result['status'] = 'MANUAL'
+                    result['error'] = f"Confianza insuficiente ({decision.overall_confidence:.2f})"
+                    result['low_confidence_questions'] = decision.low_confidence_questions
+                    
+                    # Cerrar modal sin enviar
+                    self._close_modal()
+                    return False
+        
+        # Si llegamos aquí, se alcanzó el límite de pasos
+        self.logger.warning(f"  Se alcanzó el límite de {max_steps} pasos")
+        result['status'] = 'MANUAL'
+        result['error'] = f"Se alcanzó límite de {max_steps} pasos sin completar"
+        result['questions_answered'] = questions_answered
+        return False
+    
+    def _load_cv_context(self, cv_recommendation) -> dict:
+        """Carga el contexto del CV para la IA"""
+        # TODO: Cargar desde archivo JSON o config
+        # Por ahora, usar respuestas_comunes.json como fallback
+        return self.answers.get('informacion_personal', {})
+    
+    def _handle_cv_upload_with_ai(self, field, cv_recommendation, result):
+        """Maneja la subida de CV usando la recomendación de IA"""
+        try:
+            cv_filename = f"CV {cv_recommendation.cv_type.title()} {'Anabalon' if cv_recommendation.language == 'en' else 'Anabalón'}.pdf"
+            cv_path = Path(f"config/{cv_filename}")
+            
+            if not cv_path.exists():
+                self.logger.warning(f"  CV no encontrado: {cv_path}")
+                return False
+            
+            field.element.send_keys(str(cv_path.absolute()))
+            self.logger.info(f"  ✓ CV subido: {cv_filename}")
+            time.sleep(2)
+            return True
+            
+        except Exception as e:
+            self.logger.warning(f"  Error subiendo CV: {e}")
+            return False
+    
+    def _fill_field_with_answer(self, field, answer_data) -> bool:
+        """
+        Llena un campo con la respuesta de la IA
+        
+        Args:
+            field: FormField object
+            answer_data: QuestionAnswer object
+        
+        Returns:
+            True si se llenó exitosamente
+        """
+        try:
+            element = field.element
+            
+            # Intentar con Selenium primero
+            try:
+                if field.field_type == 'dropdown':
+                    from selenium.webdriver.support.ui import Select
+                    select = Select(element)
+                    # Buscar opción que coincida con la respuesta
+                    for option in select.options:
+                        if answer_data.answer.lower() in option.text.lower():
+                            select.select_by_visible_text(option.text)
+                            return True
+                    return False
+                    
+                elif field.field_type in ['radio', 'checkbox']:
+                    # Buscar el radio/checkbox correcto
+                    parent = element.find_element(By.XPATH, "..")
+                    labels = parent.find_elements(By.TAG_NAME, "label")
+                    for label in labels:
+                        if answer_data.answer.lower() in label.text.lower():
+                            label.click()
+                            return True
+                    return False
+                    
+                else:  # text, email, phone, textarea
+                    element.clear()
+                    element.send_keys(answer_data.answer)
+                    return True
+                    
+            except Exception as e:
+                # Fallback a JavaScript
+                self.logger.warning(f"    Selenium falló, usando JavaScript: {e}")
+                self.driver.execute_script(
+                    "arguments[0].value = arguments[1]; arguments[0].dispatchEvent(new Event('input', { bubbles: true }));",
+                    element,
+                    answer_data.answer
+                )
+                return True
+                
+        except Exception as e:
+            self.logger.warning(f"    Error llenando campo: {e}")
+            return False
+    
+    def _click_next_or_submit_button(self) -> dict:
+        """
+        Busca y hace clic en el botón siguiente o enviar
+        
+        Returns:
+            Dict con {found: bool, is_submit: bool, button_text: str}
+        """
+        try:
+            click_script = """
+            let debug = {
+                total_buttons: document.querySelectorAll('button').length,
+                visible_buttons: 0,
+                buttons_found: []
+            };
+            
+            // Buscar botón de acción
+            const buttonSelectors = [
+                'button[data-easy-apply-next-button]',
+                'button[aria-label*="siguiente"]',
+                'button[aria-label*="Next"]',
+                'button[aria-label*="Enviar"]',
+                'button[aria-label*="Submit"]',
+                'button[aria-label*="Revisar"]',
+                'button[aria-label*="Review"]',
+                'button.artdeco-button--primary'
+            ];
+            
+            // Listar botones visibles para debugging
+            const allButtons = document.querySelectorAll('button');
+            for (let btn of allButtons) {
+                if (btn.offsetParent !== null) {
+                    debug.visible_buttons++;
+                    debug.buttons_found.push({
+                        text: btn.textContent.trim().substring(0, 50),
+                        aria: (btn.getAttribute('aria-label') || '').substring(0, 50)
+                    });
+                }
+            }
+            
+            // Buscar botón específico
+            for (let selector of buttonSelectors) {
+                const buttons = document.querySelectorAll(selector);
+                for (let btn of buttons) {
+                    if (btn.offsetParent !== null) {
+                        const ariaLabel = btn.getAttribute('aria-label') || '';
+                        const text = btn.textContent || '';
+                        const isSubmit = ariaLabel.toLowerCase().includes('enviar') || 
+                                       ariaLabel.toLowerCase().includes('submit') ||
+                                       text.toLowerCase().includes('enviar');
+                        
+                        btn.click();
+                        
+                        return {
+                            found: true,
+                            is_submit: isSubmit,
+                            button_text: text.trim(),
+                            aria_label: ariaLabel,
+                            debug: debug
+                        };
+                    }
+                }
+            }
+            
+            return {found: false, debug: debug};
+            """
+            
+            result = self.driver.execute_script(click_script)
+            
+            if result and result.get('debug'):
+                debug = result['debug']
+                self.logger.info(f"  → Debug: {debug['total_buttons']} botones totales, {debug['visible_buttons']} visibles")
+            
+            return result if result else {'found': False}
+            
+        except Exception as e:
+            self.logger.warning(f"  Error buscando botón: {e}")
+            return {'found': False}
+    
+    def _close_modal(self):
+        """Cierra el modal sin enviar"""
+        try:
+            close_script = """
+            const closeButtons = document.querySelectorAll('button[aria-label*="Descartar"], button[aria-label*="Dismiss"], button[aria-label*="Close"]');
+            for (let btn of closeButtons) {
+                if (btn.offsetParent !== null) {
+                    btn.click();
+                    return true;
+                }
+            }
+            return false;
+            """
+            closed = self.driver.execute_script(close_script)
+            if closed:
+                self.logger.info("  ✓ Modal cerrado")
+            else:
+                self.logger.warning("  ⚠ No se pudo cerrar modal")
+        except Exception as e:
+            self.logger.warning(f"  Error cerrando modal: {e}")
+    
+    def detect_captcha_or_block(self) -> bool:
+        """
+        Detecta si hay CAPTCHA o bloqueo de sesión
+        
+        Returns:
+            True si se detecta CAPTCHA o bloqueo
+        """
+        try:
+            # Detectar CAPTCHA
+            captcha_indicators = [
+                "div[id*='captcha']",
+                "iframe[src*='captcha']",
+                "div[class*='captcha']",
+                "#px-captcha"
+            ]
+            
+            for selector in captcha_indicators:
+                try:
+                    element = self.driver.find_element(By.CSS_SELECTOR, selector)
+                    if element.is_displayed():
+                        self.logger.warning("⚠️ CAPTCHA detectado!")
+                        return True
+                except NoSuchElementException:
+                    continue
+            
+            # Detectar redirect a login (sesión bloqueada)
+            current_url = self.driver.current_url
+            if '/login' in current_url or '/checkpoint' in current_url:
+                self.logger.warning("⚠️ Sesión bloqueada - redirect a login detectado")
+                return True
+            
+            return False
+            
+        except Exception as e:
+            self.logger.warning(f"Error detectando CAPTCHA: {e}")
+            return False
+    
+    def save_cookies(self):
+        """Guarda las cookies de sesión"""
+        try:
+            cookies = self.driver.get_cookies()
+            cookies_file = Path("data/cookies/linkedin_cookies.json")
+            cookies_file.parent.mkdir(parents=True, exist_ok=True)
+            
+            with open(cookies_file, 'w', encoding='utf-8') as f:
+                json.dump(cookies, f, indent=2)
+            
+            self.logger.info(f"✓ Cookies guardadas: {len(cookies)} cookies")
+            
+        except Exception as e:
+            self.logger.warning(f"No se pudieron guardar cookies: {e}")
+    
+    def load_cookies(self):
+        """Carga las cookies de sesión guardadas"""
+        try:
+            cookies_file = Path("data/cookies/linkedin_cookies.json")
+            
+            if not cookies_file.exists():
+                self.logger.info("No hay cookies guardadas")
+                return False
+            
+            with open(cookies_file, 'r', encoding='utf-8') as f:
+                cookies = json.load(f)
+            
+            # Primero ir a LinkedIn para establecer el dominio
+            self.driver.get("https://www.linkedin.com")
+            time.sleep(2)
+            
+            # Agregar cada cookie
+            for cookie in cookies:
+                try:
+                    # Remover campos que pueden causar problemas
+                    cookie.pop('sameSite', None)
+                    cookie.pop('expiry', None)
+                    self.driver.add_cookie(cookie)
+                except Exception as e:
+                    self.logger.warning(f"No se pudo agregar cookie: {e}")
+            
+            self.logger.info(f"✓ Cookies cargadas: {len(cookies)} cookies")
+            return True
+            
+        except Exception as e:
+            self.logger.warning(f"No se pudieron cargar cookies: {e}")
+            return False
+    
+    def simulate_human_behavior(self):
+        """Simula comportamiento humano para evitar detección"""
+        try:
+            import random
+            
+            # Scroll gradual aleatorio
+            scroll_amount = random.randint(100, 400)
+            self.driver.execute_script(f"window.scrollBy(0, {scroll_amount});")
+            time.sleep(random.uniform(0.5, 1.5))
+            
+            # Movimiento de mouse aleatorio (usando JavaScript)
+            self.driver.execute_script("""
+                const event = new MouseEvent('mousemove', {
+                    clientX: Math.random() * window.innerWidth,
+                    clientY: Math.random() * window.innerHeight
+                });
+                document.dispatchEvent(event);
+            """)
+            
+            # Delay variable
+            time.sleep(random.uniform(0.3, 0.8))
+            
+        except Exception as e:
+            # No es crítico si falla
+            pass
     
     def fill_form_with_javascript(self, job: Dict[str, Any], result: Dict[str, Any]) -> bool:
         """
@@ -301,7 +1047,7 @@ class LinkedInApplier:
     
     def apply_to_job(self, job: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Aplica a un trabajo específico
+        Aplica a un trabajo específico usando IA y sistema de confianza
         
         Args:
             job: Diccionario con datos del trabajo
@@ -318,163 +1064,111 @@ class LinkedInApplier:
             'job_title': job['title'],
             'company': job['company'],
             'success': False,
-            'status': 'PENDING',  # Estados: PENDING, APPLIED, MANUAL, ERROR, ELIMINADO
+            'status': 'PENDING',  # Estados: PENDING, APPLIED, MANUAL, NO_DISPONIBLE, ERROR, INSEGURO
             'error': None,
             'questions_encountered': [],
-            'cv_used': None
+            'questions_answered': [],
+            'cv_used': None,
+            'confidence_score': None
         }
         
         try:
-            # Ir a la página del trabajo
+            # 1. Verificar si trabajo ya fue procesado
+            if self.state_manager.is_job_processed(job['url']):
+                self.logger.info("✓ Trabajo ya procesado anteriormente, saltando...")
+                result['status'] = 'SKIPPED'
+                result['error'] = 'Already processed'
+                return result
+            
+            # 2. Verificar CAPTCHA o bloqueo antes de procesar
+            if self.detect_captcha_or_block():
+                result['error'] = "CAPTCHA o bloqueo de sesión detectado"
+                result['status'] = 'ERROR'
+                self.logger.error("✗ CAPTCHA o bloqueo detectado - deteniendo ejecución")
+                
+                # Guardar estado y salir
+                self.state_manager.save_job_state(job['url'], 'ERROR', None, result['error'])
+                raise Exception("CAPTCHA_DETECTED")  # Esto detendrá el flujo completo
+            
+            # 3. Ir a la página del trabajo
             self.driver.get(job['url'])
             self.logger.info(f"  Cargando página del trabajo...")
-            time.sleep(5)  # Aumentar tiempo de espera
+            time.sleep(5)
+            
+            # Simular comportamiento humano
+            self.simulate_human_behavior()
             
             # Scroll para asegurar que el botón esté visible
             self.driver.execute_script("window.scrollTo(0, 300);")
             time.sleep(1)
             
-            # Verificar si el trabajo ya no acepta postulaciones (eliminado/cerrado)
-            try:
-                # Buscar indicadores de trabajo cerrado
-                closed_indicators = [
-                    "No longer accepting applications",
-                    "Ya no se aceptan solicitudes",
-                    "This job is no longer available",
-                    "Este trabajo ya no está disponible",
-                    "Closed",
-                    "Cerrado"
-                ]
+            # 3. Verificar si el trabajo ya no acepta postulaciones (eliminado/cerrado)
+            if self._is_job_unavailable():
+                result['error'] = "Trabajo ya no acepta postulaciones (eliminado/cerrado)"
+                result['status'] = 'NO_DISPONIBLE'
+                self.logger.warning("✗ Trabajo cerrado - ya no acepta postulaciones")
                 
-                page_text = self.driver.find_element(By.TAG_NAME, "body").text
-                is_closed = any(indicator.lower() in page_text.lower() for indicator in closed_indicators)
-                
-                if is_closed:
-                    result['error'] = "Trabajo ya no acepta postulaciones (eliminado/cerrado)"
-                    result['status'] = 'ELIMINADO'
-                    self.logger.warning("✗ Trabajo cerrado - ya no acepta postulaciones")
-                    return result
-            except Exception:
-                pass  # Continuar si no se puede verificar
-            
-            # Buscar botón Easy Apply con múltiples selectores (incluyendo <a> tags)
-            easy_apply_button = None
-            selectors = [
-                # Botones tradicionales
-                "button.jobs-apply-button",
-                "button[aria-label*='Solicitud sencilla']",
-                "button[aria-label*='Easy Apply']",
-                "button#jobs-apply-button-id",
-                "button[data-live-test-job-apply-button]",
-                # Links que funcionan como botones (caso común en LinkedIn)
-                "a[aria-label*='Solicitud sencilla']",
-                "a[aria-label*='Easy Apply']",
-                "a.jobs-apply-button"
-            ]
-            
-            for selector in selectors:
-                try:
-                    easy_apply_button = WebDriverWait(self.driver, 5).until(
-                        EC.presence_of_element_located((By.CSS_SELECTOR, selector))
-                    )
-                    if easy_apply_button:
-                        self.logger.info(f"  ✓ Botón Easy Apply encontrado con: {selector}")
-                        break
-                except TimeoutException:
-                    continue
-            
-            if not easy_apply_button:
-                # Verificar si es porque el trabajo está cerrado o no tiene Easy Apply
-                try:
-                    # Buscar botón "Postular" externo (no Easy Apply)
-                    external_apply = self.driver.find_elements(By.CSS_SELECTOR, "button[aria-label*='Postular'], a[aria-label*='Apply']")
-                    if external_apply:
-                        result['error'] = "Requiere postulación externa (no Easy Apply)"
-                        result['status'] = 'MANUAL'
-                        self.logger.warning("✗ Trabajo requiere postulación externa")
-                        return result
-                except Exception:
-                    pass
-                
-                result['error'] = "No se encontró botón Easy Apply"
-                result['status'] = 'MANUAL'
-                self.logger.warning("✗ No se encontró botón Easy Apply con ningún selector")
-                
-                # Guardar screenshot para debug
-                screenshot_path = Path(f"data/logs/debug_no_button_{job['title'][:30]}.png")
-                screenshot_path.parent.mkdir(parents=True, exist_ok=True)
-                self.driver.save_screenshot(str(screenshot_path))
-                self.logger.info(f"  Screenshot guardado: {screenshot_path}")
+                # Update state and sheets
+                self.state_manager.save_job_state(job['url'], 'NO_DISPONIBLE', None, result['error'])
+                if self.sheets_updater:
+                    self._update_sheets(job, result)
                 
                 return result
             
-            # Click en Easy Apply
-            try:
-                # Scroll al botón
-                self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", easy_apply_button)
-                time.sleep(1)
-                
-                # Intentar click
-                easy_apply_button.click()
-                self.logger.info("  ✓ Click en Easy Apply realizado")
-                time.sleep(3)  # Esperar a que abra el modal
-                
-            except Exception as e:
-                # Intentar click con JavaScript si falla el click normal
-                self.logger.warning(f"  Click normal falló, intentando con JavaScript...")
-                self.driver.execute_script("arguments[0].click();", easy_apply_button)
-                time.sleep(3)
+            # 4. Expandir descripción completa (si hay botón "Ver más")
+            full_description = self._expand_job_description(job)
             
-            # Verificar que el modal se haya abierto usando JavaScript
-            # LinkedIn carga el modal dinámicamente, usar JavaScript es más confiable
-            modal_element = None
-            try:
-                self.logger.info("  → Esperando a que el modal cargue (JavaScript)...")
-                
-                # Esperar hasta 15 segundos a que aparezca el modal
-                max_wait = 15
-                for i in range(max_wait):
-                    time.sleep(1)
-                    
-                    # Usar JavaScript para buscar el modal
-                    modal_found = self.driver.execute_script("""
-                        // Buscar modal por múltiples selectores
-                        const selectors = [
-                            'div[data-test-modal-id="easy-apply-modal"]',
-                            'div[data-test-modal-container]',
-                            'div.jobs-easy-apply-modal',
-                            'div[role="dialog"]'
-                        ];
-                        
-                        for (let selector of selectors) {
-                            const modal = document.querySelector(selector);
-                            if (modal && modal.offsetParent !== null) {
-                                return selector;
-                            }
-                        }
-                        return null;
-                    """)
-                    
-                    if modal_found:
-                        self.logger.info(f"  ✓ Modal detectado con JavaScript: {modal_found} (después de {i+1}s)")
-                        # Obtener referencia al modal
-                        try:
-                            modal_element = self.driver.find_element(By.CSS_SELECTOR, modal_found)
-                        except:
-                            # Si falla, usar JavaScript para todo
-                            modal_element = "javascript"  # Flag especial
-                        break
-                
-                if not modal_element:
-                    self.logger.warning("  ⚠ Modal no detectado después de 15s, continuando con JavaScript...")
-                    modal_element = "javascript"  # Usar JavaScript para todo
-                    
-            except Exception as e:
-                self.logger.warning(f"  ⚠ Error verificando modal: {str(e)}, usando JavaScript...")
-                modal_element = "javascript"
+            # 5. Seleccionar CV con IA
+            cv_recommendation = self.cv_selector.select_cv(
+                job_title=job['title'],
+                job_description=full_description
+            )
             
-            # Procesar formulario multi-paso (pasar referencia al modal)
-            aplicacion_exitosa = self.process_application_form(job, result, modal_element)
+            if cv_recommendation:
+                result['cv_used'] = f"{cv_recommendation.cv_type}_{cv_recommendation.language}"
+                self.logger.info(f"  ✓ CV seleccionado: {result['cv_used']} (confianza: {cv_recommendation.confidence:.2f})")
+                self.logger.info(f"    Razón: {cv_recommendation.reasoning}")
+            else:
+                result['error'] = "No se pudo seleccionar CV"
+                result['status'] = 'ERROR'
+                self.state_manager.save_job_state(job['url'], 'ERROR', None, result['error'])
+                return result
+            
+            # 6. Buscar y hacer clic en botón Easy Apply
+            # Guardar URL antes del clic para detectar redirects
+            url_before_click = self.driver.current_url
+            self.logger.info(f"  URL antes del clic: {url_before_click}")
+            
+            if not self._click_easy_apply_button(result):
+                # Error ya registrado en result
+                self.state_manager.save_job_state(job['url'], result['status'], result.get('cv_used'), result['error'])
+                if self.sheets_updater:
+                    self._update_sheets(job, result)
+                return result
+            
+            # 7. Detectar modal con JavaScript (pasar URL inicial para detectar redirects)
+            modal_element = self.modal_detector.wait_for_modal(self.driver, timeout=20, initial_url=url_before_click)
+            
+            if not modal_element:
+                result['error'] = "Modal no detectado después de hacer clic en Easy Apply"
+                result['status'] = 'MANUAL'
+                self.logger.warning("  ⚠ Modal no detectado")
+                
+                # Save debug HTML
+                self._save_debug_html(job, "modal_not_detected")
+                
+                self.state_manager.save_job_state(job['url'], 'MANUAL', result.get('cv_used'), result['error'])
+                if self.sheets_updater:
+                    self._update_sheets(job, result)
+                
+                return result
+            
+            self.logger.info("  ✓ Modal detectado exitosamente")
+            
+            # 8. Procesar formulario multi-paso con IA
+            aplicacion_exitosa = self._process_application_form_with_ai(
+                job, result, modal_element, cv_recommendation, full_description
+            )
             
             if aplicacion_exitosa:
                 result['success'] = True
@@ -482,9 +1176,31 @@ class LinkedInApplier:
             else:
                 self.logger.warning(f"✗ No se pudo completar la aplicación")
             
+            # 9. Guardar estado final
+            self.state_manager.save_job_state(
+                job['url'], 
+                result['status'], 
+                result.get('cv_used'), 
+                result.get('error')
+            )
+            
+            # 10. Actualizar Google Sheets
+            if self.sheets_updater:
+                self._update_sheets(job, result)
+            
+            # 11. Acumular resultado para Telegram
+            if self.telegram_notifier:
+                self.telegram_notifier.accumulate_result(job, result)
+            
         except Exception as e:
             result['error'] = str(e)
+            result['status'] = 'ERROR'
             self.logger.error(f"Error aplicando: {str(e)}")
+            
+            # Save error state
+            self.state_manager.save_job_state(job['url'], 'ERROR', result.get('cv_used'), str(e))
+            if self.sheets_updater:
+                self._update_sheets(job, result)
         
         return result
     
@@ -1043,7 +1759,7 @@ def main():
     """Función principal de prueba"""
     from linkedin_scraper import LinkedInScraper
     
-    print("🤖 LinkedIn Job Applier - Prueba")
+    print("🤖 LinkedIn Job Applier - Con IA y Sistema de Confianza")
     print("=" * 60)
     
     config = Config()
@@ -1055,24 +1771,19 @@ def main():
         logger.error("No se pudieron cargar credenciales")
         return
     
-    # ============================================================================
-    # PASO 1: Cargar solo los NUEVOS trabajos del scraper
-    # ============================================================================
-    
-    # Cargar todos los trabajos de jobs_found.json y filtrar solo los nuevos (is_new: true)
-    jobs_file = Path("data/logs/jobs_found.json")
+    # Cargar trabajos nuevos
+    jobs_file = Path("data/logs/new_jobs_to_apply.json")
     if not jobs_file.exists():
-        logger.info("No hay trabajos para aplicar (jobs_found.json no existe)")
+        logger.info("No hay trabajos para aplicar (new_jobs_to_apply.json no existe)")
         return
     
     with open(jobs_file, 'r', encoding='utf-8') as f:
         all_jobs = json.load(f)
     
-    # Filtrar solo trabajos nuevos (is_new: true) con Easy Apply
-    new_jobs = [job for job in all_jobs if job.get('is_new', False)]
-    pending_jobs = [job for job in new_jobs if job.get('has_easy_apply')]
+    # Filtrar solo trabajos nuevos con Easy Apply
+    pending_jobs = [job for job in all_jobs if job.get('has_easy_apply')]
     
-    logger.info(f"Trabajos NUEVOS pendientes de aplicar: {len(pending_jobs)}")
+    logger.info(f"Trabajos pendientes de aplicar: {len(pending_jobs)}")
     
     if len(pending_jobs) == 0:
         logger.info("No hay trabajos nuevos con Easy Apply")
@@ -1082,76 +1793,118 @@ def main():
     scraper = LinkedInScraper(config, logger, headless=False)
     scraper.setup_driver()
     
-    if not scraper.login(credentials['username'], credentials['password']):
-        logger.error("Login fallido")
-        return
-    
-    # Crear applier
+    # Crear applier con nuevos componentes
     applier = LinkedInApplier(scraper.driver, config, logger)
-
-    # Inicializar Telegram (si está disponible)
-    notifier = None
-    if TelegramNotifier:
+    
+    # Intentar cargar cookies guardadas
+    cookies_loaded = applier.load_cookies()
+    
+    if cookies_loaded:
+        logger.info("✓ Cookies cargadas, verificando sesión...")
+        # Ir a LinkedIn para verificar si la sesión es válida
+        scraper.driver.get("https://www.linkedin.com/feed/")
+        time.sleep(3)
+        
+        # Verificar si estamos logueados
         try:
-            notifier = TelegramNotifier()
-            logger.info('✓ Telegram notifier inicializado')
-        except Exception as e:
-            logger.warning(f'Telegram no configurado: {e}')
+            scraper.driver.find_element(By.CSS_SELECTOR, "nav.global-nav")
+            logger.info("✓ Sesión válida con cookies")
+        except NoSuchElementException:
+            logger.info("Cookies expiradas, haciendo login...")
+            if not scraper.login(credentials['username'], credentials['password']):
+                logger.error("Login fallido")
+                return
+            applier.save_cookies()
+    else:
+        # Login normal
+        if not scraper.login(credentials['username'], credentials['password']):
+            logger.error("Login fallido")
+            return
+        applier.save_cookies()
     
-    # Inicializar Google Sheets para agregar resultados
-    sheets_manager = None
-    try:
-        from google_sheets_manager import GoogleSheetsManager
-        sheets_id = config.get_env_var('GOOGLE_SHEETS_ID')
-        if sheets_id and Path('config/google_credentials.json').exists():
-            sheets_manager = GoogleSheetsManager('config/google_credentials.json', sheets_id)
-            logger.info('✓ Google Sheets manager inicializado')
-    except Exception as e:
-        logger.warning(f'Google Sheets no disponible: {e}')
-    
-    # ============================================================================
-    # PASO 2: Aplicar solo a los trabajos nuevos
-    # ============================================================================
-    
+    # Aplicar a trabajos
     results = []
+    captcha_detected = False
+    
     for i, job in enumerate(pending_jobs):
         logger.info(f"\n--- Trabajo {i+1}/{len(pending_jobs)} ---")
-        result = applier.apply_to_job(job)
-        results.append(result)
         
-        # Agregar a Google Sheets INMEDIATAMENTE (sin esperar a que termine todo)
-        if sheets_manager:
-            try:
-                sheets_manager.add_job_application(job, result)
-                logger.info('  ✓ Agregado a Google Sheets')
-            except Exception as e:
-                logger.warning(f'  ✗ Error agregando a Google Sheets: {e}')
+        try:
+            result = applier.apply_to_job(job)
+            results.append(result)
+        except Exception as e:
+            if "CAPTCHA_DETECTED" in str(e):
+                logger.error("⚠️ CAPTCHA detectado - deteniendo ejecución")
+                captcha_detected = True
+                
+                # Marcar trabajos restantes como pendientes
+                for remaining_job in pending_jobs[i:]:
+                    applier.state_manager.save_job_state(
+                        remaining_job['url'], 
+                        'PENDING', 
+                        None, 
+                        'Ejecución detenida por CAPTCHA'
+                    )
+                break
+            else:
+                logger.error(f"Error inesperado: {e}")
+                results.append({
+                    'job_url': job['url'],
+                    'job_title': job['title'],
+                    'company': job['company'],
+                    'success': False,
+                    'status': 'ERROR',
+                    'error': str(e)
+                })
         
-        time.sleep(5)  # Delay entre aplicaciones
+        # Delay aleatorio entre aplicaciones (anti-bot)
+        if i < len(pending_jobs) - 1:  # No esperar después del último
+            import random
+            delay = random.uniform(8, 15)
+            logger.info(f"  Esperando {delay:.1f}s antes de siguiente aplicación...")
+            time.sleep(delay)
     
-    # Mostrar resumen
+    # Guardar cookies al final
+    if not captcha_detected:
+        applier.save_cookies()
+    
+    # Enviar resumen consolidado por Telegram
+    if applier.telegram_notifier and not captcha_detected:
+        try:
+            logger.info("\n" + "="*60)
+            logger.info("Enviando resumen por Telegram...")
+            applier.telegram_notifier.send_summary()
+            logger.info("✓ Resumen enviado por Telegram")
+        except Exception as e:
+            logger.warning(f"No se pudo enviar resumen por Telegram: {e}")
+    
+    # Mostrar resumen en consola
     logger.info(f"\n{'='*60}")
     logger.info("RESUMEN DE APLICACIONES")
     logger.info(f"{'='*60}")
     
-    successful = sum(1 for r in results if r.get('success'))
-    logger.info(f"Exitosas: {successful}/{len(results)}")
-    logger.info(f"Fallidas: {len(results) - successful}/{len(results)}")
+    successful = sum(1 for r in results if r.get('status') == 'APPLIED')
+    uncertain = sum(1 for r in results if r.get('status') == 'INSEGURO')
+    manual = sum(1 for r in results if r.get('status') == 'MANUAL')
+    unavailable = sum(1 for r in results if r.get('status') == 'NO_DISPONIBLE')
+    errors = sum(1 for r in results if r.get('status') == 'ERROR')
     
-    # Guardar resultados en archivo de logs
+    logger.info(f"Total procesados: {len(results)}")
+    logger.info(f"✅ Exitosos: {successful}")
+    logger.info(f"⚠️  Inseguros: {uncertain}")
+    logger.info(f"👤 Requieren revisión manual: {manual}")
+    logger.info(f"❌ No disponibles: {unavailable}")
+    logger.info(f"🔴 Errores: {errors}")
+    
+    # Guardar resultados
     results_file = Path("data/logs/application_results.json")
     with open(results_file, 'w', encoding='utf-8') as f:
         json.dump(results, f, indent=2, ensure_ascii=False)
     
     logger.success(f"Resultados guardados en: {results_file}")
     
-    # Actualizar dashboard si está disponible
-    if sheets_manager:
-        try:
-            sheets_manager.update_dashboard()
-            logger.info('✓ Dashboard actualizado')
-        except Exception as e:
-            logger.warning(f'No se pudo actualizar dashboard: {e}')
+    # Limpiar estado antiguo
+    applier.state_manager.cleanup_old_entries()
     
     scraper.close()
 
