@@ -37,6 +37,268 @@ class LinkedInApplier:
         # Cargar rutas de CVs
         self.cv_paths = config.get_cv_paths()
     
+    def fill_form_with_javascript(self, job: Dict[str, Any], result: Dict[str, Any]) -> bool:
+        """
+        Rellena el formulario usando JavaScript puro (más confiable que Selenium)
+        
+        Args:
+            job: Datos del trabajo
+            result: Diccionario de resultado
+        
+        Returns:
+            True si se rellenó exitosamente
+        """
+        try:
+            self.logger.info("  → Rellenando formulario con JavaScript...")
+            
+            personal_info = self.answers.get('informacion_personal', {})
+            
+            # Primero, guardar HTML para debugging
+            try:
+                html_content = self.driver.execute_script("return document.body.innerHTML;")
+                debug_path = Path(f"data/logs/debug_html_{job['title'][:30]}.html")
+                debug_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(debug_path, 'w', encoding='utf-8') as f:
+                    f.write(html_content)
+                self.logger.info(f"  → HTML guardado en: {debug_path}")
+            except Exception as e:
+                self.logger.warning(f"  No se pudo guardar HTML: {e}")
+            
+            # Script JavaScript para rellenar el formulario
+            fill_script = """
+            let filled = {
+                email: false,
+                phone_country: false,
+                phone_number: false,
+                fields_found: 0,
+                debug: {
+                    total_selects: 0,
+                    total_inputs: 0,
+                    email_selects: 0,
+                    phone_selects: 0,
+                    phone_inputs: 0
+                }
+            };
+            
+            // Contar todos los elementos
+            filled.debug.total_selects = document.querySelectorAll('select').length;
+            filled.debug.total_inputs = document.querySelectorAll('input[type="text"]').length;
+            
+            // 1. Rellenar email dropdown
+            const emailSelects = document.querySelectorAll('select');
+            filled.debug.email_selects = emailSelects.length;
+            
+            for (let select of emailSelects) {
+                const id = select.id || '';
+                const label = select.labels?.[0]?.textContent || '';
+                const prevLabel = select.previousElementSibling?.textContent || '';
+                
+                if (id.toLowerCase().includes('email') || 
+                    label.toLowerCase().includes('email') || 
+                    prevLabel.toLowerCase().includes('email')) {
+                    
+                    const options = Array.from(select.options);
+                    const emailOption = options.find(opt => opt.value && opt.value.includes('@'));
+                    if (emailOption) {
+                        select.value = emailOption.value;
+                        select.dispatchEvent(new Event('change', { bubbles: true }));
+                        select.dispatchEvent(new Event('input', { bubbles: true }));
+                        filled.email = true;
+                        filled.fields_found++;
+                    }
+                }
+            }
+            
+            // 2. Rellenar phone country code
+            const phoneCountrySelects = document.querySelectorAll('select');
+            filled.debug.phone_selects = phoneCountrySelects.length;
+            
+            for (let select of phoneCountrySelects) {
+                const id = select.id || '';
+                const label = select.labels?.[0]?.textContent || '';
+                
+                if (id.includes('phoneNumber') && id.includes('country') || 
+                    label.toLowerCase().includes('phone') && label.toLowerCase().includes('country')) {
+                    
+                    const options = Array.from(select.options);
+                    const chileOption = options.find(opt => 
+                        opt.value && (opt.value.includes('Chile') || opt.value.includes('+56'))
+                    );
+                    if (chileOption) {
+                        select.value = chileOption.value;
+                        select.dispatchEvent(new Event('change', { bubbles: true }));
+                        select.dispatchEvent(new Event('input', { bubbles: true }));
+                        filled.phone_country = true;
+                        filled.fields_found++;
+                    }
+                }
+            }
+            
+            // 3. Rellenar phone number
+            const phoneInputs = document.querySelectorAll('input[type="text"]');
+            filled.debug.phone_inputs = phoneInputs.length;
+            
+            for (let input of phoneInputs) {
+                const id = input.id || '';
+                const label = input.labels?.[0]?.textContent || '';
+                const placeholder = input.placeholder || '';
+                
+                if (id.includes('phoneNumber') || id.includes('phone') ||
+                    label.toLowerCase().includes('phone') || 
+                    label.toLowerCase().includes('móvil') ||
+                    placeholder.toLowerCase().includes('phone')) {
+                    
+                    input.value = arguments[0];
+                    input.dispatchEvent(new Event('input', { bubbles: true }));
+                    input.dispatchEvent(new Event('change', { bubbles: true }));
+                    filled.phone_number = true;
+                    filled.fields_found++;
+                }
+            }
+            
+            return filled;
+            """
+            
+            result_js = self.driver.execute_script(fill_script, personal_info.get('telefono', ''))
+            
+            # Logging detallado
+            if result_js:
+                debug_info = result_js.get('debug', {})
+                self.logger.info(f"  → Debug: {debug_info['total_selects']} selects, {debug_info['total_inputs']} inputs encontrados")
+                
+                if result_js.get('fields_found', 0) > 0:
+                    self.logger.info(f"  ✓ Campos rellenados con JavaScript: {result_js['fields_found']}")
+                    if result_js.get('email'):
+                        self.logger.info("    - Email seleccionado")
+                    if result_js.get('phone_country'):
+                        self.logger.info("    - País de teléfono seleccionado")
+                    if result_js.get('phone_number'):
+                        self.logger.info("    - Número de teléfono ingresado")
+                    return True
+                else:
+                    self.logger.warning(f"  ⚠ No se encontraron campos para rellenar")
+                    self.logger.warning(f"     Elementos en página: {debug_info['total_selects']} selects, {debug_info['total_inputs']} inputs")
+                    return False
+            else:
+                self.logger.warning("  ⚠ JavaScript no retornó resultado")
+                return False
+                
+        except Exception as e:
+            self.logger.warning(f"  Error rellenando con JavaScript: {str(e)}")
+            import traceback
+            self.logger.warning(f"  Traceback: {traceback.format_exc()}")
+            return False
+    
+    def click_next_button_with_javascript(self) -> dict:
+        """
+        Busca y hace click en el botón Siguiente/Enviar usando JavaScript
+        
+        Returns:
+            Dict con {found: bool, is_submit: bool, button_text: str, debug: dict}
+        """
+        try:
+            click_script = """
+            let debug = {
+                total_buttons: document.querySelectorAll('button').length,
+                visible_buttons: 0,
+                buttons_found: []
+            };
+            
+            // Buscar botón de acción
+            const buttonSelectors = [
+                'button[data-easy-apply-next-button]',
+                'button[aria-label*="siguiente"]',
+                'button[aria-label*="Next"]',
+                'button[aria-label*="Enviar"]',
+                'button[aria-label*="Submit"]',
+                'button.artdeco-button--primary'
+            ];
+            
+            // Listar todos los botones visibles para debugging
+            const allButtons = document.querySelectorAll('button');
+            for (let btn of allButtons) {
+                if (btn.offsetParent !== null) {
+                    debug.visible_buttons++;
+                    debug.buttons_found.push({
+                        text: btn.textContent.trim().substring(0, 50),
+                        aria: (btn.getAttribute('aria-label') || '').substring(0, 50),
+                        classes: btn.className.substring(0, 100)
+                    });
+                }
+            }
+            
+            // Buscar botón específico
+            for (let selector of buttonSelectors) {
+                const buttons = document.querySelectorAll(selector);
+                for (let btn of buttons) {
+                    if (btn.offsetParent !== null) {  // Visible
+                        const ariaLabel = btn.getAttribute('aria-label') || '';
+                        const text = btn.textContent || '';
+                        const isSubmit = ariaLabel.toLowerCase().includes('enviar') || 
+                                       ariaLabel.toLowerCase().includes('submit') ||
+                                       text.toLowerCase().includes('enviar');
+                        
+                        // Hacer click
+                        btn.click();
+                        
+                        return {
+                            found: true,
+                            is_submit: isSubmit,
+                            button_text: text.trim(),
+                            aria_label: ariaLabel,
+                            debug: debug
+                        };
+                    }
+                }
+            }
+            
+            return {found: false, debug: debug};
+            """
+            
+            result = self.driver.execute_script(click_script)
+            
+            # Logging detallado
+            if result and result.get('debug'):
+                debug = result['debug']
+                self.logger.info(f"  → Debug: {debug['total_buttons']} botones totales, {debug['visible_buttons']} visibles")
+                
+                if not result.get('found') and debug.get('buttons_found'):
+                    self.logger.info("  → Botones visibles encontrados:")
+                    for btn_info in debug['buttons_found'][:5]:
+                        self.logger.info(f"     - '{btn_info['text']}' / aria: '{btn_info['aria']}'")
+            
+            return result if result else {'found': False}
+            
+        except Exception as e:
+            self.logger.warning(f"  Error haciendo click con JavaScript: {str(e)}")
+            import traceback
+            self.logger.warning(f"  Traceback: {traceback.format_exc()}")
+            return {'found': False}
+        """
+        Busca elementos en un contexto (puede ser driver, elemento normal, o shadow root)
+        
+        Args:
+            search_context: Contexto donde buscar (driver, elemento, o shadow root)
+            by: Tipo de selector (By.CSS_SELECTOR, etc.)
+            selector: Selector CSS
+        
+        Returns:
+            Lista de elementos encontrados
+        """
+        try:
+            if search_context is None:
+                search_context = self.driver
+            
+            # Si es un shadow root, usar find_elements directamente
+            if hasattr(search_context, 'find_elements'):
+                return search_context.find_elements(by, selector)
+            else:
+                # Fallback al driver
+                return self.driver.find_elements(by, selector)
+        except Exception as e:
+            self.logger.warning(f"  Error buscando elementos: {e}")
+            return []
+    
     def apply_to_job(self, job: Dict[str, Any]) -> Dict[str, Any]:
         """
         Aplica a un trabajo específico
@@ -163,45 +425,56 @@ class LinkedInApplier:
                 self.driver.execute_script("arguments[0].click();", easy_apply_button)
                 time.sleep(3)
             
-            # Verificar que el modal se haya abierto
+            # Verificar que el modal se haya abierto usando JavaScript
+            # LinkedIn carga el modal dinámicamente, usar JavaScript es más confiable
+            modal_element = None
             try:
-                modal_selectors = [
-                    "div[data-test-modal-id='easy-apply-modal']",
-                    "div.jobs-easy-apply-modal",
-                    "div[role='dialog'][aria-labelledby*='apply']"
-                ]
+                self.logger.info("  → Esperando a que el modal cargue (JavaScript)...")
                 
-                modal_found = False
-                for modal_selector in modal_selectors:
-                    try:
-                        modal = WebDriverWait(self.driver, 5).until(
-                            EC.presence_of_element_located((By.CSS_SELECTOR, modal_selector))
-                        )
-                        if modal and modal.is_displayed():
-                            modal_found = True
-                            self.logger.info("  ✓ Modal de aplicación abierto correctamente")
-                            break
-                    except TimeoutException:
-                        continue
+                # Esperar hasta 15 segundos a que aparezca el modal
+                max_wait = 15
+                for i in range(max_wait):
+                    time.sleep(1)
+                    
+                    # Usar JavaScript para buscar el modal
+                    modal_found = self.driver.execute_script("""
+                        // Buscar modal por múltiples selectores
+                        const selectors = [
+                            'div[data-test-modal-id="easy-apply-modal"]',
+                            'div[data-test-modal-container]',
+                            'div.jobs-easy-apply-modal',
+                            'div[role="dialog"]'
+                        ];
+                        
+                        for (let selector of selectors) {
+                            const modal = document.querySelector(selector);
+                            if (modal && modal.offsetParent !== null) {
+                                return selector;
+                            }
+                        }
+                        return null;
+                    """)
+                    
+                    if modal_found:
+                        self.logger.info(f"  ✓ Modal detectado con JavaScript: {modal_found} (después de {i+1}s)")
+                        # Obtener referencia al modal
+                        try:
+                            modal_element = self.driver.find_element(By.CSS_SELECTOR, modal_found)
+                        except:
+                            # Si falla, usar JavaScript para todo
+                            modal_element = "javascript"  # Flag especial
+                        break
                 
-                if not modal_found:
-                    result['error'] = "Modal de aplicación no se abrió"
-                    result['status'] = 'ERROR'
-                    self.logger.warning("✗ Modal no se abrió después del click")
-                    
-                    # Screenshot para debug
-                    screenshot_path = Path(f"data/logs/debug_no_modal_{job['title'][:30]}.png")
-                    screenshot_path.parent.mkdir(parents=True, exist_ok=True)
-                    self.driver.save_screenshot(str(screenshot_path))
-                    
-                    return result
+                if not modal_element:
+                    self.logger.warning("  ⚠ Modal no detectado después de 15s, continuando con JavaScript...")
+                    modal_element = "javascript"  # Usar JavaScript para todo
                     
             except Exception as e:
-                self.logger.warning(f"  No se pudo verificar modal: {str(e)}")
-                # Continuar de todas formas, puede que esté abierto
+                self.logger.warning(f"  ⚠ Error verificando modal: {str(e)}, usando JavaScript...")
+                modal_element = "javascript"
             
-            # Procesar formulario multi-paso
-            aplicacion_exitosa = self.process_application_form(job, result)
+            # Procesar formulario multi-paso (pasar referencia al modal)
+            aplicacion_exitosa = self.process_application_form(job, result, modal_element)
             
             if aplicacion_exitosa:
                 result['success'] = True
@@ -215,13 +488,14 @@ class LinkedInApplier:
         
         return result
     
-    def process_application_form(self, job: Dict[str, Any], result: Dict[str, Any]) -> bool:
+    def process_application_form(self, job: Dict[str, Any], result: Dict[str, Any], modal_element=None) -> bool:
         """
         Procesa el formulario de aplicación multi-paso
         
         Args:
             job: Datos del trabajo
             result: Diccionario de resultado (se modifica)
+            modal_element: Elemento del modal (para buscar dentro de él)
         
         Returns:
             True si se completó exitosamente, False si no
@@ -236,15 +510,30 @@ class LinkedInApplier:
         # Detectar si estamos en loop (mismo botón varias veces)
         button_history = []
         
+        # Esperar un poco más para que el modal cargue completamente
+        time.sleep(3)
+        
+        # Si no tenemos referencia al modal O es el flag "javascript", usar JavaScript puro
+        use_javascript = (modal_element == "javascript" or modal_element is None)
+        search_context = None if use_javascript else modal_element
+        
+        if use_javascript:
+            self.logger.info("  → Usando JavaScript para interactuar con el formulario")
+        
         while current_step < max_steps:
             current_step += 1
             self.logger.info(f"  Paso {current_step}...")
             
             time.sleep(2)
             
-            # Rellenar formulario actual ANTES de buscar botón
-            new_questions = self.fill_current_form_step(job, result, seen_questions)
-            questions_without_answer.extend(new_questions)
+            # Rellenar formulario
+            if use_javascript:
+                # Usar JavaScript puro
+                filled = self.fill_form_with_javascript(job, result)
+            else:
+                # Usar Selenium tradicional
+                new_questions = self.fill_current_form_step(job, result, seen_questions, search_context)
+                questions_without_answer.extend(new_questions)
             
             # Si hay más de 3 preguntas sin respuesta, abortar
             if len(questions_without_answer) > 3:
@@ -255,40 +544,95 @@ class LinkedInApplier:
             
             time.sleep(1)
             
-            # Buscar botón de acción
-            next_button = None
-            button_selectors = [
-                "button[aria-label*='Enviar']",
-                "button[aria-label*='Submit']",
-                "button[aria-label*='Send']",
-                "button[aria-label*='Continuar']",
-                "button[aria-label*='siguiente']",
-                "button[aria-label*='Next']",
-                "button[aria-label*='Siguiente']",
-                "button[data-easy-apply-next-button]",
-                "button[aria-label*='Review']",
-                "button[aria-label*='Revisar']",
-                "button.artdeco-button--primary"
-            ]
-            
-            for selector in button_selectors:
-                try:
-                    buttons = self.driver.find_elements(By.CSS_SELECTOR, selector)
-                    for btn in buttons:
-                        if btn.is_displayed() and btn.is_enabled():
-                            next_button = btn
+            # Buscar y hacer click en botón
+            if use_javascript:
+                # Usar JavaScript para buscar y hacer click
+                button_result = self.click_next_button_with_javascript()
+                
+                if button_result.get('found'):
+                    button_text = button_result.get('button_text', '')
+                    is_submit = button_result.get('is_submit', False)
+                    
+                    self.logger.info(f"  ✓ Click en botón: '{button_text}' (JavaScript)")
+                    
+                    time.sleep(2)
+                    
+                    if is_submit:
+                        self.logger.success("  ✓ Aplicación enviada!")
+                        result['status'] = 'APPLIED'
+                        result['success'] = True
+                        return True
+                else:
+                    self.logger.warning("  ⚠ No se encontró botón con JavaScript")
+                    result['error'] = f"No se encontró botón en paso {current_step}"
+                    result['status'] = 'MANUAL'
+                    return False
+            else:
+                # Usar Selenium tradicional (código existente)
+                next_button = None
+                button_selectors = [
+                    # Botones de envío (prioridad alta)
+                    "button[aria-label*='Enviar']",
+                    "button[aria-label*='Submit']",
+                    "button[aria-label*='Send application']",
+                    "button[aria-label*='Enviar solicitud']",
+                    # Botones de navegación
+                    "button[aria-label*='Continuar']",
+                    "button[aria-label*='Continue']",
+                    "button[aria-label*='siguiente']",
+                    "button[aria-label*='Next']",
+                    "button[aria-label*='Siguiente']",
+                    "button[data-easy-apply-next-button]",
+                    "button[aria-label*='Review']",
+                    "button[aria-label*='Revisar']",
+                    # Selectores genéricos (última opción)
+                    "button.artdeco-button--primary",
+                    "button[type='button'].artdeco-button"
+                ]
+                
+                for selector in button_selectors:
+                    try:
+                        buttons = self.find_elements_in_context(search_context, By.CSS_SELECTOR, selector)
+                        for btn in buttons:
+                            if btn.is_displayed() and btn.is_enabled():
+                                # Verificar que no sea el botón de cerrar
+                                aria_label = btn.get_attribute('aria-label') or ''
+                                if 'descartar' in aria_label.lower() or 'dismiss' in aria_label.lower() or 'close' in aria_label.lower():
+                                    continue
+                                next_button = btn
+                                self.logger.info(f"  ✓ Botón encontrado con selector: {selector}")
+                                break
+                        if next_button:
                             break
-                    if next_button:
-                        break
-                except NoSuchElementException:
-                    continue
+                    except NoSuchElementException:
+                        continue
             
             if not next_button:
-                self.logger.warning("  No se encontró botón de acción")
+                self.logger.warning("  ⚠ No se encontró botón de acción")
+                
+                # Intentar buscar cualquier botón visible en el modal
+                try:
+                    all_buttons = self.find_elements_in_context(search_context, By.CSS_SELECTOR, "button")
+                    visible_buttons = [btn for btn in all_buttons if btn.is_displayed() and btn.is_enabled()]
+                    
+                    if visible_buttons:
+                        self.logger.info(f"  ℹ Encontrados {len(visible_buttons)} botones visibles EN EL MODAL")
+                        for btn in visible_buttons[:5]:  # Mostrar primeros 5
+                            aria = btn.get_attribute('aria-label') or ''
+                            text = btn.text or ''
+                            self.logger.info(f"    - Botón: '{text}' / aria-label: '{aria}'")
+                    else:
+                        self.logger.warning("  ⚠ No se encontraron botones visibles en el modal")
+                except Exception as e:
+                    self.logger.warning(f"  Error listando botones: {e}")
+                
                 screenshot_path = Path(f"data/logs/debug_no_next_button_{current_step}.png")
                 screenshot_path.parent.mkdir(parents=True, exist_ok=True)
                 self.driver.save_screenshot(str(screenshot_path))
                 self.logger.info(f"  Screenshot guardado: {screenshot_path}")
+                
+                result['error'] = f"No se encontró botón en paso {current_step}"
+                result['status'] = 'MANUAL'
                 return False
             
             button_aria_label = next_button.get_attribute('aria-label') or ''
@@ -296,7 +640,7 @@ class LinkedInApplier:
             
             # IMPORTANTE: Detectar botón "Enviar" ANTES de hacer click
             button_context = f"{button_text} {button_aria_label}".lower()
-            is_submit_button = any(word in button_context for word in ['enviar', 'submit', 'send application'])
+            is_submit_button = any(word in button_context for word in ['enviar', 'submit', 'send application', 'enviar solicitud'])
             
             # Detectar loop infinito
             button_history.append(button_aria_label)
@@ -308,7 +652,7 @@ class LinkedInApplier:
                     result['status'] = 'MANUAL'
                     return False
             
-            self.logger.info(f"  Botón encontrado: '{button_text}'")
+            self.logger.info(f"  Botón encontrado: '{button_text}' (aria-label: '{button_aria_label}')")
             
             # Click en el botón
             try:
@@ -317,8 +661,14 @@ class LinkedInApplier:
                 next_button.click()
                 self.logger.info(f"  ✓ Click en '{button_text}'")
             except Exception as e:
-                self.driver.execute_script("arguments[0].click();", next_button)
-                self.logger.info(f"  ✓ Click en '{button_text}' (JavaScript)")
+                try:
+                    self.driver.execute_script("arguments[0].click();", next_button)
+                    self.logger.info(f"  ✓ Click en '{button_text}' (JavaScript)")
+                except Exception as e2:
+                    self.logger.error(f"  ✗ Error en click: {e2}")
+                    result['error'] = f"No se pudo hacer click en botón: {e2}"
+                    result['status'] = 'ERROR'
+                    return False
             
             time.sleep(2)
             
@@ -328,13 +678,15 @@ class LinkedInApplier:
                 time.sleep(3)
                 self.logger.success("  ✓ Aplicación enviada!")
                 result['status'] = 'APPLIED'
+                result['success'] = True
                 return True
         
         self.logger.warning("  Se alcanzó el límite de pasos")
         result['status'] = 'MANUAL'
+        result['error'] = f"Se alcanzó límite de {max_steps} pasos sin completar"
         return False
     
-    def fill_current_form_step(self, job: Dict[str, Any], result: Dict[str, Any], seen_questions: set) -> list:
+    def fill_current_form_step(self, job: Dict[str, Any], result: Dict[str, Any], seen_questions: set, search_context=None) -> list:
         """
         Rellena el paso actual del formulario
         
@@ -342,31 +694,61 @@ class LinkedInApplier:
             job: Datos del trabajo
             result: Diccionario de resultado
             seen_questions: Set de preguntas ya vistas (para evitar duplicados)
+            search_context: Elemento donde buscar (modal o driver completo)
         
         Returns:
             Lista de preguntas nuevas sin respuesta
         """
         new_questions = []
         
+        # Si no hay contexto, usar driver completo (fallback)
+        if search_context is None:
+            search_context = self.driver
+        
         try:
+            self.logger.info("  → Rellenando formulario...")
+            
             # 1. Upload CV si es necesario
-            self.handle_cv_upload(job, result)
+            cv_uploaded = self.handle_cv_upload(job, result, search_context)
             
-            # 2. Buscar y rellenar campos de texto
-            text_fields = self.driver.find_elements(By.CSS_SELECTOR, "input[type='text'], input[type='email'], input[type='tel']")
-            for field in text_fields:
-                self.fill_text_field(field, result)
+            # 2. Buscar y rellenar campos de texto (DENTRO DEL MODAL)
+            # Usar selectores más específicos para campos del formulario
+            text_field_selectors = [
+                "input[type='text'][data-test-single-line-text-form-component]",  # Campos específicos del form
+                "input[type='email']",
+                "input[type='tel']",
+                "input[type='text']"  # Genérico como fallback
+            ]
             
-            # 3. Buscar y rellenar textareas
-            textareas = self.driver.find_elements(By.TAG_NAME, "textarea")
-            for textarea in textareas:
-                self.fill_textarea(textarea, result)
+            text_fields = []
+            for selector in text_field_selectors:
+                try:
+                    fields = self.find_elements_in_context(search_context, By.CSS_SELECTOR, selector)
+                    text_fields.extend(fields)
+                except:
+                    continue
             
-            # 4. Buscar y responder preguntas de radio/checkbox
-            self.handle_radio_questions(result, seen_questions, new_questions)
+            if text_fields:
+                self.logger.info(f"  → Encontrados {len(text_fields)} campos de texto EN EL MODAL")
+                for field in text_fields:
+                    self.fill_text_field(field, result)
             
-            # 5. Buscar y responder dropdowns
-            self.handle_dropdown_questions(result, seen_questions, new_questions)
+            # 3. Buscar y rellenar textareas (DENTRO DEL MODAL)
+            textareas = self.find_elements_in_context(search_context, By.TAG_NAME, "textarea")
+            if textareas:
+                self.logger.info(f"  → Encontrados {len(textareas)} textareas EN EL MODAL")
+                for textarea in textareas:
+                    self.fill_textarea(textarea, result)
+            
+            # 4. Buscar y responder preguntas de radio/checkbox (DENTRO DEL MODAL)
+            self.handle_radio_questions(result, seen_questions, new_questions, search_context)
+            
+            # 5. Buscar y responder dropdowns (DENTRO DEL MODAL)
+            # Filtrar dropdowns del formulario específicamente
+            self.handle_dropdown_questions(result, seen_questions, new_questions, search_context)
+            
+            if not text_fields and not textareas and not new_questions:
+                self.logger.info("  → No se encontraron campos para rellenar en este paso")
             
             return new_questions
             
@@ -374,11 +756,14 @@ class LinkedInApplier:
             self.logger.warning(f"  Error rellenando formulario: {str(e)}")
             return new_questions
     
-    def handle_cv_upload(self, job: Dict[str, Any], result: Dict[str, Any]) -> bool:
+    def handle_cv_upload(self, job: Dict[str, Any], result: Dict[str, Any], search_context=None) -> bool:
         """Maneja la subida de CV"""
+        if search_context is None:
+            search_context = self.driver
+            
         try:
             # Buscar input de archivo
-            file_inputs = self.driver.find_elements(By.CSS_SELECTOR, "input[type='file']")
+            file_inputs = self.find_elements_in_context(search_context, By.CSS_SELECTOR, "input[type='file']")
             
             if not file_inputs:
                 return True  # No hay upload, está bien
@@ -477,10 +862,13 @@ class LinkedInApplier:
         except Exception as e:
             pass
     
-    def handle_radio_questions(self, result: Dict[str, Any], seen_questions: set, new_questions: list):
+    def handle_radio_questions(self, result: Dict[str, Any], seen_questions: set, new_questions: list, search_context=None):
         """Maneja preguntas de tipo radio button"""
+        if search_context is None:
+            search_context = self.driver
+            
         try:
-            radio_groups = self.driver.find_elements(By.CSS_SELECTOR, "fieldset, div[role='radiogroup']")
+            radio_groups = self.find_elements_in_context(search_context, By.CSS_SELECTOR, "fieldset, div[role='radiogroup']")
             
             for group in radio_groups:
                 try:
@@ -515,12 +903,31 @@ class LinkedInApplier:
         except Exception as e:
             pass
     
-    def handle_dropdown_questions(self, result: Dict[str, Any], seen_questions: set, new_questions: list):
+    def handle_dropdown_questions(self, result: Dict[str, Any], seen_questions: set, new_questions: list, search_context=None):
         """Maneja preguntas de tipo dropdown/select"""
-        try:
-            selects = self.driver.find_elements(By.TAG_NAME, "select")
+        if search_context is None:
+            search_context = self.driver
             
+        try:
+            # Buscar solo dropdowns dentro del formulario (con data-test-form-element)
+            selects = self.find_elements_in_context(search_context, By.CSS_SELECTOR, "select[data-test-text-entity-list-form-select], select")
+            
+            # Filtrar dropdowns que NO sean de idioma de LinkedIn
+            form_selects = []
             for select in selects:
+                select_id = select.get_attribute('id') or ''
+                # Ignorar dropdown de idioma de LinkedIn
+                if 'language' in select_id.lower() or 'locale' in select_id.lower():
+                    continue
+                # Solo incluir si tiene data-test o está dentro de un form
+                if select.get_attribute('data-test-text-entity-list-form-select') or select.find_element(By.XPATH, "./ancestor::form"):
+                    form_selects.append(select)
+            
+            if not form_selects:
+                # Fallback: usar todos los selects encontrados excepto idioma
+                form_selects = [s for s in selects if 'language' not in (s.get_attribute('id') or '').lower()]
+            
+            for select in form_selects:
                 try:
                     select_id = select.get_attribute('id') or ''
                     aria_label = select.get_attribute('aria-label') or ''
