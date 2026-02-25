@@ -120,35 +120,55 @@ class LinkedInScraper:
             
             # Intentar cargar cookies primero
             if self.load_cookies():
+                self.logger.info("✓ Cookies cargadas, verificando sesión...")
                 self.driver.refresh()
                 time.sleep(3)
                 
                 # Verificar si estamos logueados
                 if self.is_logged_in():
                     self.logger.success("Login exitoso usando cookies guardadas")
+                    # Guardar cookies actualizadas
+                    self.save_cookies()
                     return True
+                else:
+                    self.logger.info("Cookies expiradas, haciendo login...")
             
             # Si no funcionaron las cookies, hacer login manual
             self.logger.info("Realizando login manual...")
             
+            # Verificar si ya estamos en la página de login
+            current_url = self.driver.current_url
+            if '/login' not in current_url:
+                self.driver.get("https://www.linkedin.com/login")
+                time.sleep(2)
+            
             # Ingresar email
-            email_input = WebDriverWait(self.driver, 10).until(
-                EC.presence_of_element_located((By.ID, "username"))
-            )
-            email_input.clear()
-            email_input.send_keys(email)
-            
-            # Ingresar password
-            password_input = self.driver.find_element(By.ID, "password")
-            password_input.clear()
-            password_input.send_keys(password)
-            
-            # Click en login
-            login_button = self.driver.find_element(By.CSS_SELECTOR, "button[type='submit']")
-            login_button.click()
-            
-            # Esperar a que cargue el feed
-            time.sleep(5)
+            try:
+                email_input = WebDriverWait(self.driver, 10).until(
+                    EC.presence_of_element_located((By.ID, "username"))
+                )
+                email_input.clear()
+                email_input.send_keys(email)
+                
+                # Ingresar password
+                password_input = self.driver.find_element(By.ID, "password")
+                password_input.clear()
+                password_input.send_keys(password)
+                
+                # Click en login
+                login_button = self.driver.find_element(By.CSS_SELECTOR, "button[type='submit']")
+                login_button.click()
+                
+                # Esperar a que cargue el feed
+                time.sleep(5)
+            except Exception as e:
+                self.logger.error(f"Error en formulario de login: {e}")
+                # Puede que ya estemos logueados
+                if self.is_logged_in():
+                    self.logger.success("Ya estábamos logueados")
+                    self.save_cookies()
+                    return True
+                return False
             
             # Verificar si hay verificación de seguridad
             current_url = self.driver.current_url
@@ -175,16 +195,46 @@ class LinkedInScraper:
                 return False
                 
         except Exception as e:
-            self.logger.error(f"Error en login: {str(e)}")
+            self.logger.error(f"Error en login: {e}")
+            # Verificar si a pesar del error estamos logueados
+            if self.is_logged_in():
+                self.logger.success("Login exitoso (detectado después de error)")
+                self.save_cookies()
+                return True
             return False
     
     def is_logged_in(self) -> bool:
         """Verifica si estamos logueados en LinkedIn"""
         try:
-            # Buscar elemento que solo aparece cuando estás logueado
-            self.driver.find_element(By.CSS_SELECTOR, "a[href*='/feed/']")
-            return True
-        except NoSuchElementException:
+            # Intentar múltiples indicadores de sesión activa
+            indicators = [
+                "a[href*='/feed/']",
+                "a[href*='/mynetwork/']",
+                "a[href*='/jobs/']",
+                "button[data-view-name='navigation-settings']",
+                "nav.global-nav",
+                "div[data-testid='primary-nav']"
+            ]
+            
+            for indicator in indicators:
+                try:
+                    self.driver.find_element(By.CSS_SELECTOR, indicator)
+                    self.logger.info(f"  ✓ Sesión verificada con: {indicator}")
+                    return True
+                except NoSuchElementException:
+                    continue
+            
+            # Si ninguno funciona, verificar URL
+            current_url = self.driver.current_url
+            if '/feed' in current_url or '/mynetwork' in current_url or '/jobs' in current_url:
+                self.logger.info("  ✓ Sesión verificada por URL")
+                return True
+            
+            self.logger.warning("  ✗ No se detectó sesión activa")
+            return False
+            
+        except Exception as e:
+            self.logger.warning(f"  Error verificando sesión: {e}")
             return False
     
     def search_jobs(self, keywords: str, location: str, num_jobs: int = 25, existing_job_ids: set = None) -> List[Dict[str, Any]]:

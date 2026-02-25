@@ -27,6 +27,7 @@ class FormFieldDetector:
     # Selectores específicos de LinkedIn para cada tipo de campo
     FIELD_TYPES = {
         'text': 'input[data-test-single-line-text-form-component]',
+        'numeric': 'input[inputmode="text"][id*="numeric"], input[type="text"][id*="numeric"]',  # Campos numéricos
         'email': 'input[type="email"]',
         'phone_country': 'select[id*="phoneNumber-country"]',
         'phone_number': 'input[id*="phoneNumber-nationalNumber"]',
@@ -34,7 +35,9 @@ class FormFieldDetector:
         'textarea': 'textarea',
         'radio': 'input[type="radio"]',
         'checkbox': 'input[type="checkbox"]',
-        'file': 'input[type="file"]'
+        'file': 'input[type="file"], input[id*="document-upload"], input[accept*="pdf"]',  # Campos de archivo
+        # Bug 2 fix: Selector mejorado para CV radio buttons con fallbacks
+        'cv_radio': 'input[type="radio"][id*="jobsDocumentCardToggle"], input[type="radio"][id*="document"], label.jobs-document-upload-redesign-card__container input[type="radio"]'
     }
     
     def detect_fields(self, modal_element: WebElement) -> List[FormField]:
@@ -53,10 +56,39 @@ class FormFieldDetector:
         logger.info("Detectando campos del formulario dentro del modal")
         detected_fields = []
         
+        # Import WebDriverWait for explicit waits (Bug 2 fix)
+        from selenium.webdriver.support.ui import WebDriverWait
+        from selenium.webdriver.support import expected_conditions as EC
+        from selenium.webdriver.common.by import By
+        from selenium.common.exceptions import TimeoutException
+        
         for field_type, selector in self.FIELD_TYPES.items():
             try:
+                # Bug 2 fix: Add explicit wait for cv_radio fields to render
+                if field_type == 'cv_radio':
+                    try:
+                        WebDriverWait(modal_element, 5).until(
+                            lambda driver: len(modal_element.find_elements("css selector", selector)) > 0
+                        )
+                        logger.info(f"✓ CV radio buttons encontrados después de espera explícita")
+                    except TimeoutException:
+                        logger.warning(f"Timeout esperando CV radio buttons con selector: {selector}")
+                        logger.warning(f"HTML del modal (primeros 500 chars): {modal_element.get_attribute('outerHTML')[:500]}")
+                
                 # Buscar elementos SOLO dentro del modal
                 elements = modal_element.find_elements("css selector", selector)
+                
+                # Bug 2 fix: Log detallado para cv_radio
+                if field_type == 'cv_radio':
+                    if not elements:
+                        logger.warning(f"No se encontraron CV radio buttons con selector: {selector}")
+                        logger.warning(f"Intentando búsqueda más amplia...")
+                        # Intentar búsqueda más amplia si el selector específico falla
+                        elements = modal_element.find_elements("xpath", "//input[@type='radio' and contains(@id, 'document')]")
+                        if elements:
+                            logger.info(f"✓ Encontrados {len(elements)} CV radio buttons con búsqueda ampliada")
+                    else:
+                        logger.info(f"✓ Encontrados {len(elements)} CV radio buttons")
                 
                 for element in elements:
                     try:
@@ -233,11 +265,39 @@ class FormFieldDetector:
             field_element: WebElement del campo select
             
         Returns:
-            Lista de opciones disponibles
+            Lista de opciones disponibles (excluyendo placeholders)
         """
         try:
             options = field_element.find_elements("tag name", "option")
-            return [opt.text.strip() for opt in options if opt.text.strip()]
+            valid_options = []
+            
+            for opt in options:
+                text = opt.text.strip()
+                value = opt.get_attribute('value')
+                
+                # Filtrar opciones placeholder/vacías
+                if not text or not value:
+                    continue
+                
+                # Filtrar textos placeholder comunes
+                placeholder_texts = [
+                    'selecciona una opción',
+                    'select an option',
+                    'choose an option',
+                    'elige una opción',
+                    'seleccione',
+                    'select',
+                    'choose',
+                    '--',
+                    '---'
+                ]
+                
+                if text.lower() in placeholder_texts:
+                    continue
+                
+                valid_options.append(text)
+            
+            return valid_options
         except Exception as e:
-            logger.debug(f"Error al obtener opciones del dropdown: {e}")
+            logger.info(f"Error al obtener opciones del dropdown: {e}")
             return []

@@ -1,0 +1,83 @@
+{
+  "informacion_personal": {
+    "nombre_completo": "José Tomás Anabalón",
+    "email": "[email]",
+    "telefono": "[phone]",
+    "ubicacion": "Chile",
+    "linkedin": "[linkedin_url]"
+  },
+  "pretensiones_salariales": {
+    "minimo_clp": 1000000,
+    "maximo_clp": 1400000,
+    "moneda": "CLP",
+    "formato_texto": "Entre $1.000.000 y $1.400.000 CLP mensuales"
+  },
+  "experiencia_tecnologias": {
+    "python": {
+      "años": 5,
+      "nivel": "Expert"
+    },
+    "sql": {
+      "años": 4,
+      "nivel": "Advanced",
+      "detalles": "PostgreSQL, MySQL, Snowflake"
+    },
+    "aws": {
+      "años": 2,
+      "nivel": "Intermediate",
+      "servicios": ["S3", "Lambda", "EMR", "IoT"]
+    },
+    "airflow": {
+      "años": 0,
+      "nivel": "None",
+      "nota": "NO tengo experiencia con Apache Airflow"
+    },
+    "docker": {
+      "años": 2,
+      "nivel": "Intermediate"
+    },
+    "kubernetes": {
+      "años": 0,
+      "nivel": "None"
+    },
+    "spark": {
+      "años": 0,
+      "nivel": "None"
+    },
+    "ruby": {
+      "años": 3,
+      "nivel": "Advanced"
+    },
+    "javascript": {
+      "años": 3,
+      "nivel": "Advanced"
+    },
+    "machine_learning": {
+      "años": 3,
+      "nivel": "Advanced",
+      "frameworks": ["PyTorch", "TensorFlow", "Scikit-learn"]
+    },
+    "web_scraping": {
+      "años": 4,
+      "nivel": "Advanced",
+      "herramientas": ["Selenium", "BeautifulSoup", "n8n"]
+    }
+  },
+  "educacion": {
+    "nivel": "Universitario",
+    "carrera": "Ingeniería Civil en Ciencias de la Computación",
+    "universidad": "Universidad de los Andes",
+    "año_graduacion": 2025,
+    "estado": "Completo"
+  },
+  "idiomas": {
+    "español": "Nativo",
+    "ingles": "C1 Advanced (TOEFL ITP, Cambridge FCE)",
+    "aleman": "A1 Basic"
+  },
+  "disponibilidad": {
+    "tipo_trabajo": "Remoto preferido",
+    "jornada": "Tiempo completo",
+    "disponibilidad_inmediata": true
+  }
+}

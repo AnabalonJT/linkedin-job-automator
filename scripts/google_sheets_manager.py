@@ -104,7 +104,10 @@ class GoogleSheetsManager:
     
     def add_job_application(self, job: Dict[str, Any], result: Dict[str, Any] = None):
         """
-        Agrega una aplicación a la hoja de Postulaciones
+        Agrega una aplicación a la hoja de Postulaciones.
+        
+        Verifica si el trabajo ya existe (por URL) antes de agregar.
+        Si existe, actualiza el estado en lugar de crear duplicado.
         
         Args:
             job: Datos del trabajo
@@ -119,6 +122,45 @@ class GoogleSheetsManager:
             ]
         )
         
+        job_url = job.get('url', 'N/A')
+        
+        # Verificar si el trabajo ya existe
+        try:
+            cell = worksheet.find(job_url, in_column=5)  # Columna 5 = URL
+            if cell:
+                # El trabajo ya existe, actualizar en lugar de agregar
+                print(f"  ⚠️  Trabajo ya existe en Google Sheets, actualizando...")
+                row_number = cell.row
+                
+                # Preparar datos de actualización
+                now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                status = result.get('status', 'PENDIENTE') if result else 'PENDIENTE'
+                cv_used = result.get('cv_used', 'N/A') if result else 'N/A'
+                notes = ''
+                
+                if result:
+                    if status == 'ELIMINADO':
+                        notes = result.get('error', 'Trabajo eliminado o cerrado')
+                    elif result.get('error'):
+                        notes = result['error']
+                    
+                    if result.get('questions_encountered'):
+                        num_questions = len(result['questions_encountered'])
+                        notes += f" | {num_questions} preguntas sin respuesta"
+                
+                # Actualizar solo las columnas relevantes
+                worksheet.update_cell(row_number, 8, cv_used)  # CV Usado
+                worksheet.update_cell(row_number, 9, status)  # Estado
+                worksheet.update_cell(row_number, 10, now)  # Último Update
+                worksheet.update_cell(row_number, 11, notes)  # Notas
+                
+                print(f"  ✓ Actualizado en Google Sheets: {job.get('title')} - {status}")
+                return
+        except Exception as e:
+            # Si no se encuentra, continuar con la inserción normal
+            pass
+        
+        # El trabajo no existe, agregar nuevo
         # Obtener siguiente ID
         all_values = worksheet.get_all_values()
         next_id = len(all_values)  # Incluye header
@@ -149,7 +191,7 @@ class GoogleSheetsManager:
             now,
             job.get('company', 'N/A'),
             job.get('title', 'N/A'),
-            job.get('url', 'N/A'),
+            job_url,
             job.get('location', 'N/A'),
             job.get('application_type', 'AUTO'),
             cv_used,

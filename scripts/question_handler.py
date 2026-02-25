@@ -60,7 +60,7 @@ class QuestionHandler:
     PROYECTOS DESTACADOS:
     - MakiMotion: Sistema de gestión de pacientes (Django, PostgreSQL, producción)
     - Tesis: Comparación de modelos generativos (PyTorch, TensorFlow)
-    - Bot LinkedIn: Automatización de postulaciones (n8n, Selenium, Google Sheets)
+    - Bot LinkedIn: Automatización de postulaciones (n8n, Selenium, Google Sheets, telegram)
     """
     
     def __init__(self, api_key: str = None, common_answers_path: str = "config/respuestas_comunes.json"):
@@ -121,21 +121,30 @@ class QuestionHandler:
         
         # Si no es pregunta especial, usar IA
         try:
-            system_prompt = """Eres un asistente para postulaciones de trabajo.
-Tu tarea es responder preguntas basándote en el perfil del candidato.
+            system_prompt = """Eres un asistente HONESTO para postulaciones de trabajo.
+Tu tarea es responder preguntas basándote ESTRICTAMENTE en el perfil del candidato.
 
-REGLAS CRÍTICAS:
-1. Usa SOLO información que existe en el CV
-2. Si no tienes información, marca confidence como baja (< 0.5)
-3. Para preguntas numéricas, responde SOLO el número (sin unidades, sin texto)
-4. Siempre responde en JSON válido
-5. Sé honesto: si no sabes, di que no tienes información
+REGLAS CRÍTICAS - DEBES SEGUIRLAS SIEMPRE:
+1. USA SOLO información EXPLÍCITA que existe en el CV
+2. Si una tecnología está listada pero NO tiene años de experiencia especificados, responde "0" o marca confidence como MUY BAJA (< 0.3)
+3. NUNCA inventes o asumas años de experiencia
+4. NUNCA uses "experiencia general en desarrollo de software" como razón para tecnologías específicas que NO están en el CV
+5. Para preguntas numéricas, responde SOLO el número (sin unidades, sin texto adicional)
+6. Para dropdowns con opciones disponibles, DEBES elegir EXACTAMENTE una de las opciones listadas. NO inventes respuestas.
+7. Siempre responde en JSON válido
+8. Sé EXTREMADAMENTE honesto: si no tienes información EXPLÍCITA, di "0" con baja confianza
+
+EJEMPLOS DE HONESTIDAD:
+- Si el CV dice "Python: 5 años" → responde "5" con alta confianza
+- Si el CV solo menciona "Airflow" sin años → responde "0" con confianza 0.2
+- Si el CV no menciona la tecnología → responde "0" con confianza 0.1
+- Si pregunta "¿Tienes experiencia en Glue Lambda?" y NO está en el CV → responde "0" con confianza 0.9 y razón "NO tengo experiencia con glue lambda según CV"
 
 FORMATO DE RESPUESTA:
 {{
   "answer": "tu respuesta aquí",
   "confidence": 0.0-1.0,
-  "reasoning": "por qué esta respuesta",
+  "reasoning": "por qué esta respuesta (sé específico sobre qué información usaste o por qué no tienes información)",
   "sources": ["fuente1", "fuente2"]
 }}"""
             
@@ -144,8 +153,15 @@ FORMATO DE RESPUESTA:
             if available_options:
                 options_str = f"\n\nOPCIONES DISPONIBLES:\n" + "\n".join([f"- {opt}" for opt in available_options])
             
+            # Cargar cv_context desde JSON si está disponible
+            if isinstance(cv_context, dict):
+                # Convertir dict a string legible
+                cv_context_str = json.dumps(cv_context, indent=2, ensure_ascii=False)
+            else:
+                cv_context_str = cv_context
+            
             user_message = f"""CONTEXTO DEL CANDIDATO:
-{cv_context}
+{cv_context_str}
 
 PREGUNTA:
 Tipo de campo: {field_type}
@@ -154,10 +170,22 @@ Pregunta: {question}
 
 INSTRUCCIONES ESPECIALES:
 - Si es campo numérico (number): responde SOLO el número, sin unidades ni texto
-- Si es dropdown: elige una de las opciones disponibles
+- Si es dropdown CON opciones disponibles: DEBES elegir EXACTAMENTE una de las opciones listadas arriba. NO inventes respuestas.
+- Si es dropdown SIN opciones: responde basándote en el CV
 - Si no tienes información clara: confidence < 0.5
+- CRÍTICO: Para tecnologías como Airflow, Kubernetes, Spark, Glue, Lambda - si el CV dice "años: 0" o "nivel: None", responde "0" con alta confianza
+- NUNCA uses "experiencia general" como razón para tecnologías específicas que no están en el CV
 
 RESPONDE EN JSON:"""
+            
+            # Log del prompt completo para debugging (Bug 5 fix)
+            logger.info("=" * 80)
+            logger.info("LLAMADA A OPENROUTER API")
+            logger.info("=" * 80)
+            logger.info(f"SYSTEM PROMPT:\n{system_prompt}")
+            logger.info("-" * 80)
+            logger.info(f"USER MESSAGE:\n{user_message}")
+            logger.info("=" * 80)
             
             # Llamar a OpenRouter
             response = self.client.call(
@@ -168,14 +196,31 @@ RESPONDE EN JSON:"""
                 expect_json=True
             )
             
+            # Log de la respuesta completa (Bug 5 fix)
+            logger.info("=" * 80)
+            logger.info("RESPUESTA DE OPENROUTER API")
+            logger.info("=" * 80)
+            logger.info(f"RAW RESPONSE:\n{response}")
+            logger.info("=" * 80)
+            
             # Parsear respuesta
             result = self.client.extract_json_response(response)
+            
+            # Log del JSON parseado (Bug 5 fix)
+            logger.info("JSON PARSEADO:")
+            logger.info(json.dumps(result, indent=2, ensure_ascii=False))
+            logger.info("=" * 80)
             
             # Validar y extraer datos
             answer = result.get('answer', '')
             confidence = result.get('confidence', 0.5)
             reasoning = result.get('reasoning', 'Respuesta generada por IA')
             sources = result.get('sources', ['CV context'])
+            
+            # Log del reasoning y campos extraídos (Bug 5 fix)
+            logger.info(f"REASONING DEL MODELO: {reasoning}")
+            logger.info(f"CONFIDENCE: {confidence}")
+            logger.info(f"ANSWER: {answer}")
             
             # Validar formato de respuesta según tipo de campo
             if field_type in ['number', 'text_input_number']:
@@ -257,13 +302,12 @@ RESPONDE EN JSON:"""
         
         # 4. Salario
         if self._matches_pattern(question_lower, ['salary', 'salario', 'renta', 'pretensiones', 'compensation', 'sueldo']):
-            salary_answer = self.common_answers.get('preguntas_configuradas', {}).get('pretensiones_salariales', {})
             return QuestionAnswer(
                 question=question,
-                answer=salary_answer.get('respuesta_corta', 'A convenir'),
-                confidence=0.85,
-                reasoning="Respuesta estándar para preguntas de salario",
-                sources=["Respuestas configuradas"],
+                answer="1200000",
+                confidence=0.95,
+                reasoning="Expectativa salarial: 1.200.000 CLP mensuales",
+                sources=["Información personal"],
                 field_type=field_type
             )
         
@@ -296,7 +340,10 @@ RESPONDE EN JSON:"""
     
     def _handle_experience_question(self, question: str, question_lower: str, field_type: str) -> QuestionAnswer:
         """Maneja preguntas sobre años de experiencia."""
+        logger.info(f"Procesando pregunta de experiencia: {question}")
+        
         # Buscar tecnología específica en la pregunta
+        # IMPORTANTE: Listar SOLO tecnologías con años EXPLÍCITOS en el CV
         tech_experience = {
             'python': '5',
             'ruby': '3',
@@ -309,25 +356,56 @@ RESPONDE EN JSON:"""
             'aws': '2',
             'machine learning': '2',
             'ml': '2',
-            'ai': '2',
             'automatización': '2',
             'automation': '2',
-            'data': '2'
+            'data': '2',
+            # Tecnologías con 0 años (NO tengo experiencia)
+            'airflow': '0',
+            'apache airflow': '0',
+            'kubernetes': '0',
+            'k8s': '0',
+            'spark': '0',
+            'apache spark': '0',
+            'kafka': '0',
+            'terraform': '0',
+            'jenkins': '0',
+            'mongodb': '0',
+            'mongo': '0',
+            'glue': '0',
+            'aws glue': '0',
+            'lambda': '0',
+            'aws lambda': '0',
+            'glue lambda': '0',
+            'node.js': '1',
+            'nodejs': '1',
+            'node': '1'
         }
         
-        # Buscar coincidencias
-        for tech, years in tech_experience.items():
+        # CRITICAL FIX: Ordenar tecnologías por longitud (más largas primero) para evitar substring matching incorrecto
+        # Esto asegura que "airflow" se verifique antes que "ai", evitando coincidencias falsas
+        sorted_techs = sorted(tech_experience.items(), key=lambda x: len(x[0]), reverse=True)
+        logger.info(f"Tecnologías ordenadas (primeras 5): {[tech for tech, _ in sorted_techs[:5]]}")
+        
+        # Buscar coincidencias (priorizar coincidencias más largas primero)
+        for tech, years in sorted_techs:
             if tech in question_lower:
+                confidence = 0.95 if years != '0' else 0.90
+                reasoning = f"Años de experiencia con {tech} según CV" if years != '0' else f"NO tengo experiencia con {tech} según CV"
+                
+                logger.info(f"✓ COINCIDENCIA ENCONTRADA: '{tech}' → {years} años")
+                logger.info(f"  Pregunta contenía: '{tech}' en '{question_lower}'")
+                
                 return QuestionAnswer(
                     question=question,
                     answer=years,
-                    confidence=0.95,
-                    reasoning=f"Años de experiencia con {tech} según CV",
+                    confidence=confidence,
+                    reasoning=reasoning,
                     sources=["Experiencia profesional"],
                     field_type=field_type
                 )
         
         # Si no se encontró tecnología específica, usar experiencia general
+        logger.info("No se encontró tecnología específica, usando experiencia general")
         return QuestionAnswer(
             question=question,
             answer="4",

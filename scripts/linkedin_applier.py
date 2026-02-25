@@ -162,35 +162,98 @@ class LinkedInApplier:
             Descripción completa del trabajo
         """
         try:
-            # Buscar botones de expansión
+            self.logger.info("  Intentando expandir descripción...")
+            
+            # Buscar botones de expansión (múltiples intentos)
             expand_selectors = [
                 "button[aria-label*='Ver más']",
                 "button[aria-label*='Show more']",
                 "button[aria-label*='See more']",
-                "button.jobs-description__footer-button"
+                "button.jobs-description__footer-button",
+                "button[data-testid='expandable-text-button']",  # Nuevo selector
+                "button:has-text('más')",  # Botón con texto "más"
             ]
             
+            button_clicked = False
             for selector in expand_selectors:
                 try:
                     expand_button = self.driver.find_element(By.CSS_SELECTOR, selector)
                     if expand_button.is_displayed():
+                        self.logger.info(f"  Botón encontrado: {selector}")
+                        # Scroll al botón primero
+                        self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", expand_button)
+                        time.sleep(0.5)
                         # Click usando JavaScript para mayor confiabilidad
                         self.driver.execute_script("arguments[0].click();", expand_button)
-                        self.logger.info("  ✓ Descripción expandida")
-                        time.sleep(2)  # Esperar a que cargue
+                        self.logger.info(f"  Clic ejecutado, esperando renderizado...")
+                        button_clicked = True
+                        
+                        # Bug 4 fix: Add explicit wait for content to render
+                        from selenium.webdriver.support.ui import WebDriverWait
+                        from selenium.webdriver.support import expected_conditions as EC
+                        from selenium.common.exceptions import TimeoutException
+                        
+                        try:
+                            # Esperar a que el contenido expandido esté presente
+                            WebDriverWait(self.driver, 5).until(
+                                EC.presence_of_element_located((By.CSS_SELECTOR, "div.jobs-description__content, div[class*='jobs-description']"))
+                            )
+                            self.logger.info("  ✓ Contenido expandido renderizado")
+                        except TimeoutException:
+                            self.logger.warning("  Timeout esperando contenido expandido, continuando...")
+                        
+                        time.sleep(1)  # Espera adicional para asegurar renderizado completo
                         break
                 except NoSuchElementException:
                     continue
+                except Exception as e:
+                    self.logger.info(f"  Error con selector {selector}: {e}")
+                    continue
             
-            # Extraer descripción completa
-            description_element = self.driver.find_element(By.CSS_SELECTOR, ".jobs-description__content, .jobs-description")
-            full_description = description_element.text
+            # Bug 4 fix: Selectores mejorados que funcionan post-expansión
+            self.logger.info(f"  Buscando contenido con {5} selectores...")
+            description_selectors = [
+                "div.jobs-description__content",  # Más específico
+                "div[class*='jobs-description__content']",
+                ".jobs-description",
+                "article.jobs-description",
+                "section.jobs-description",
+                ".jobs-box__html-content"
+            ]
             
-            self.logger.info(f"  ✓ Descripción extraída ({len(full_description)} caracteres)")
-            return full_description
+            for desc_selector in description_selectors:
+                try:
+                    description_element = self.driver.find_element(By.CSS_SELECTOR, desc_selector)
+                    full_description = description_element.text
+                    if full_description and len(full_description) > 50:  # Verificar que tenga contenido real
+                        self.logger.info(f"  ✓ Descripción extraída: {len(full_description)} caracteres")
+                        return full_description
+                except NoSuchElementException:
+                    continue
+            
+            # Bug 4 fix: Mejorar manejo de errores para evitar falsos negativos
+            # Si se hizo clic en el botón pero no se encontró contenido, verificar si el botón desapareció
+            if button_clicked:
+                try:
+                    # Verificar si el botón de expansión ya no está visible (señal de que se expandió)
+                    expand_button = self.driver.find_element(By.CSS_SELECTOR, expand_selectors[0])
+                    if not expand_button.is_displayed():
+                        self.logger.info("  ✓ Botón de expansión no visible (contenido expandido)")
+                except NoSuchElementException:
+                    self.logger.info("  ✓ Botón de expansión no encontrado (ya expandido)")
+            
+            # Si no se pudo extraer con selectores, intentar obtener todo el texto visible
+            self.logger.warning(f"  No se pudo extraer descripción con selectores específicos, usando fallback...")
+            body_text = self.driver.find_element(By.TAG_NAME, "body").text
+            # Buscar la sección que parece ser la descripción (heurística)
+            if len(body_text) > 100:
+                self.logger.info(f"  ✓ Descripción extraída (fallback, {len(body_text)} caracteres)")
+                return body_text
+            
+            return job.get('description', '')
             
         except Exception as e:
-            self.logger.warning(f"  No se pudo expandir descripción: {e}")
+            self.logger.warning(f"  Error expandiendo descripción: {e}")
             return job.get('description', '')
     
     def _click_easy_apply_button(self, result: Dict[str, Any]) -> bool:
@@ -354,6 +417,10 @@ class LinkedInApplier:
         current_step = 0
         questions_answered = []
         
+        # Infinite loop detection: track field signatures
+        previous_field_signatures = []
+        loop_detection_threshold = 3  # If same fields appear 3 times, it's a loop
+        
         # CV context para la IA (cargar desde archivo o config)
         cv_context = self._load_cv_context(cv_recommendation)
         
@@ -366,19 +433,50 @@ class LinkedInApplier:
             fields = self.form_detector.detect_fields(modal_element)
             self.logger.info(f"  → Detectados {len(fields)} campos en el formulario")
             
+            # Create signature of current fields for loop detection
+            current_signature = tuple(sorted([f"{f.field_type}:{f.purpose}" for f in fields]))
+            
+            # Check for infinite loop
+            if current_signature in previous_field_signatures:
+                loop_count = previous_field_signatures.count(current_signature) + 1
+                self.logger.warning(f"  ⚠ Mismos campos detectados {loop_count} veces")
+                
+                if loop_count >= loop_detection_threshold:
+                    self.logger.error(f"  ✗ LOOP INFINITO DETECTADO - Mismos {len(fields)} campos aparecen {loop_count} veces sin cambios")
+                    self.logger.error(f"     Los campos NO se están llenando correctamente")
+                    result['status'] = 'MANUAL'
+                    result['error'] = f"Loop infinito: {len(fields)} campos no se llenan (aparecieron {loop_count} veces)"
+                    result['questions_answered'] = questions_answered
+                    
+                    # Save debug info
+                    self._save_debug_screenshot(f"infinite_loop_step{current_step}")
+                    self._save_debug_html(job, f"infinite_loop_step{current_step}")
+                    
+                    # Close modal
+                    self._close_modal()
+                    return False
+            
+            previous_field_signatures.append(current_signature)
+            
             # Log cada campo detectado
             for field in fields:
                 self.logger.info(f"    Campo: tipo={field.field_type}, propósito={field.purpose}")
             
             # 2. Llenar campos con IA
+            fields_filled = 0
             for field in fields:
-                # Skip si ya tiene valor
-                if field.element.get_attribute('value'):
-                    continue
+                # Skip si ya tiene valor (excepto radio buttons que siempre necesitan verificación)
+                if field.field_type not in ['cv_radio', 'radio', 'checkbox']:
+                    current_value = field.element.get_attribute('value')
+                    if current_value:
+                        self.logger.info(f"      → Campo ya tiene valor: {current_value[:30]}...")
+                        continue
                 
-                # Manejar upload de CV
-                if field.field_type == 'file':
-                    self._handle_cv_upload_with_ai(field, cv_recommendation, result)
+                # Manejar upload de CV (tanto file input como radio buttons)
+                if field.field_type in ['file', 'cv_radio']:
+                    success = self._handle_cv_upload_with_ai(field, cv_recommendation, result)
+                    if success:
+                        fields_filled += 1
                     continue
                 
                 # Para otros campos, usar IA para responder
@@ -398,7 +496,7 @@ class LinkedInApplier:
                 
                 if answer_data:
                     # Log pregunta y respuesta
-                    self.logger.info(f"    Pregunta: {question_text[:50]}...")
+                    self.logger.info(f"    Pregunta: {question_text}")
                     self.logger.info(f"    Respuesta: {answer_data.answer} | Confianza: {answer_data.confidence:.2f}")
                     self.logger.info(f"    Razón: {answer_data.reasoning}")
                     
@@ -406,6 +504,7 @@ class LinkedInApplier:
                     success = self._fill_field_with_answer(field, answer_data)
                     
                     if success:
+                        fields_filled += 1
                         questions_answered.append({
                             'question': question_text,
                             'answer': answer_data.answer,
@@ -417,7 +516,55 @@ class LinkedInApplier:
                         # Guardar screenshot para debug
                         self._save_debug_screenshot(f"field_fill_failure_step{current_step}")
                 else:
-                    self.logger.warning(f"    ? No se pudo obtener respuesta de IA para: {question_text[:50]}...")
+                    self.logger.warning(f"    ? No se pudo obtener respuesta de IA para: {question_text}")
+            
+            self.logger.info(f"  → {fields_filled} de {len(fields)} campos llenados en este paso")
+            
+            # 2.5. Si no se detectaron campos, buscar input de archivo para CV upload
+            # Esto maneja el caso donde step 2 tiene file input pero no radio buttons
+            if len(fields) == 0:
+                self.logger.info("  → No se detectaron campos, buscando input de archivo para CV...")
+                try:
+                    # Buscar input de archivo dentro del modal
+                    file_inputs = modal_element.find_elements(By.CSS_SELECTOR, "input[type='file']")
+                    
+                    if file_inputs:
+                        self.logger.info(f"  → Encontrado {len(file_inputs)} input(s) de archivo")
+                        
+                        # Mapeo de tipos de CV a archivos reales
+                        cv_files = {
+                            'engineer_en': 'CV_ML_Data_Engineer_Jose_Tomas_Anabalon_EN.docx.pdf',
+                            'engineer_es': 'CV Automatización_Data Anabalón.pdf',
+                            'software_en': 'CV_Software_Engineer_Jose_Tomas_Anabalon_EN.docx.pdf',
+                            'software_es': 'CV Software Engineer Anabalon.pdf'
+                        }
+                        
+                        # Construir la clave del CV
+                        cv_key = f"{cv_recommendation.cv_type}_{cv_recommendation.language}"
+                        cv_filename = cv_files.get(cv_key)
+                        
+                        if not cv_filename:
+                            self.logger.warning(f"  No se encontró mapeo para CV: {cv_key}")
+                            cv_filename = f"CV {cv_recommendation.cv_type.title()} {'Anabalon' if cv_recommendation.language == 'en' else 'Anabalón'}.pdf"
+                        
+                        cv_path = Path(f"config/{cv_filename}")
+                        
+                        if cv_path.exists():
+                            # Subir CV al primer input de archivo
+                            file_inputs[0].send_keys(str(cv_path.absolute()))
+                            self.logger.info(f"  ✓ CV subido: {cv_filename}")
+                            result['cv_used'] = cv_key
+                            time.sleep(2)
+                        else:
+                            self.logger.warning(f"  CV no encontrado: {cv_path}")
+                            self.logger.warning(f"  Archivos disponibles en config/:")
+                            for f in Path("config").glob("*.pdf"):
+                                self.logger.warning(f"    - {f.name}")
+                    else:
+                        self.logger.info("  → No se encontró input de archivo")
+                        
+                except Exception as e:
+                    self.logger.warning(f"  Error buscando/subiendo CV: {e}")
             
             # 3. Buscar y hacer clic en botón siguiente/enviar
             time.sleep(1)
@@ -495,27 +642,160 @@ class LinkedInApplier:
     
     def _load_cv_context(self, cv_recommendation) -> dict:
         """Carga el contexto del CV para la IA"""
-        # TODO: Cargar desde archivo JSON o config
-        # Por ahora, usar respuestas_comunes.json como fallback
-        return self.answers.get('informacion_personal', {})
+        try:
+            cv_context_path = Path("config/cv_context.json")
+            if cv_context_path.exists():
+                with open(cv_context_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                    # Intentar parsear JSON, manejando errores de formato
+                    try:
+                        context = json.loads(content)
+                    except json.JSONDecodeError as e:
+                        self.logger.warning(f"  Error parseando JSON (línea {e.lineno}): {e.msg}")
+                        # Intentar cargar solo hasta el primer cierre de llave válido
+                        try:
+                            # Buscar el primer objeto JSON completo
+                            brace_count = 0
+                            for i, char in enumerate(content):
+                                if char == '{':
+                                    brace_count += 1
+                                elif char == '}':
+                                    brace_count -= 1
+                                    if brace_count == 0:
+                                        # Encontramos el cierre del primer objeto
+                                        context = json.loads(content[:i+1])
+                                        self.logger.info(f"  ✓ Contexto de CV cargado (parcial)")
+                                        return context
+                        except:
+                            pass
+                        # Si falla, usar fallback
+                        return self.answers.get('informacion_personal', {})
+                    
+                self.logger.info(f"  ✓ Contexto de CV cargado desde {cv_context_path}")
+                return context
+            else:
+                self.logger.warning(f"  Archivo de contexto no encontrado: {cv_context_path}")
+                # Fallback a respuestas_comunes.json
+                return self.answers.get('informacion_personal', {})
+        except Exception as e:
+            self.logger.warning(f"  Error cargando contexto de CV: {e}")
+            return self.answers.get('informacion_personal', {})
     
     def _handle_cv_upload_with_ai(self, field, cv_recommendation, result):
         """Maneja la subida de CV usando la recomendación de IA"""
         try:
-            cv_filename = f"CV {cv_recommendation.cv_type.title()} {'Anabalon' if cv_recommendation.language == 'en' else 'Anabalón'}.pdf"
+            # Verificar si es un radio button para seleccionar CV ya cargado
+            if field.field_type == 'cv_radio':
+                self.logger.info(f"  → Detectado radio button de CV ya cargado")
+                
+                # Obtener el label asociado para ver el nombre del archivo
+                try:
+                    field_id = field.element.get_attribute('id')
+                    parent = field.element.find_element(By.XPATH, "../..")
+                    
+                    # Buscar el nombre del archivo en el card
+                    file_name_element = parent.find_element(By.CSS_SELECTOR, ".jobs-document-upload-redesign-card__file-name")
+                    file_name = file_name_element.text.strip()
+                    
+                    self.logger.info(f"  → CV disponible: {file_name}")
+                    
+                    # Bug 3 fix: Usar helper method para verificar coincidencia con recomendación
+                    if self._matches_recommendation(file_name, cv_recommendation):
+                        self.logger.info(f"  ✓ CV coincide con recomendación ({cv_recommendation.cv_type}), seleccionando...")
+                        
+                        # Hacer clic en el radio button
+                        if not field.element.is_selected():
+                            # Buscar el label asociado y hacer clic en él
+                            label = parent.find_element(By.CSS_SELECTOR, f"label[for='{field_id}']")
+                            label.click()
+                            time.sleep(1)
+                            self.logger.info(f"  ✓ CV seleccionado: {file_name}")
+                            result['cv_used'] = f"{cv_recommendation.cv_type}_{cv_recommendation.language}"
+                            return True
+                        else:
+                            self.logger.info(f"  ✓ CV ya estaba seleccionado: {file_name}")
+                            result['cv_used'] = f"{cv_recommendation.cv_type}_{cv_recommendation.language}"
+                            return True
+                    else:
+                        self.logger.info(f"  → CV no coincide con recomendación, buscando siguiente...")
+                        return False
+                        
+                except Exception as e:
+                    self.logger.warning(f"  Error procesando radio button de CV: {e}")
+                    return False
+            
+            # Si es un input file tradicional, subir el archivo
+            # Mapeo de tipos de CV a archivos reales
+            cv_files = {
+                'engineer_en': 'CV_ML_Data_Engineer_Jose_Tomas_Anabalon_EN.docx.pdf',
+                'engineer_es': 'CV Automatización_Data Anabalón.pdf',
+                'software_en': 'CV_Software_Engineer_Jose_Tomas_Anabalon_EN.docx.pdf',
+                'software_es': 'CV Software Engineer Anabalon.pdf'
+            }
+            
+            # Construir la clave del CV
+            cv_key = f"{cv_recommendation.cv_type}_{cv_recommendation.language}"
+            cv_filename = cv_files.get(cv_key)
+            
+            if not cv_filename:
+                self.logger.warning(f"  No se encontró mapeo para CV: {cv_key}")
+                # Fallback al nombre antiguo
+                cv_filename = f"CV {cv_recommendation.cv_type.title()} {'Anabalon' if cv_recommendation.language == 'en' else 'Anabalón'}.pdf"
+            
             cv_path = Path(f"config/{cv_filename}")
             
             if not cv_path.exists():
                 self.logger.warning(f"  CV no encontrado: {cv_path}")
+                self.logger.warning(f"  Archivos disponibles en config/:")
+                for f in Path("config").glob("*.pdf"):
+                    self.logger.warning(f"    - {f.name}")
                 return False
             
             field.element.send_keys(str(cv_path.absolute()))
             self.logger.info(f"  ✓ CV subido: {cv_filename}")
+            result['cv_used'] = cv_key
             time.sleep(2)
             return True
             
         except Exception as e:
             self.logger.warning(f"  Error subiendo CV: {e}")
+            return False
+    
+    def _matches_recommendation(self, file_name: str, cv_recommendation) -> bool:
+        """
+        Bug 3 fix: Verifica si un CV coincide con la recomendación de AI.
+        
+        Args:
+            file_name: Nombre del archivo CV
+            cv_recommendation: CVRecommendation object con cv_type y language
+            
+        Returns:
+            True si el CV coincide con la recomendación
+        """
+        try:
+            file_name_lower = file_name.lower()
+            
+            # Definir keywords para cada tipo de CV
+            cv_keywords = {
+                'software': ['software', 'engineer', 'backend', 'fullstack', 'full stack', 'developer'],
+                'engineer': ['automatización', 'automation', 'data', 'ml', 'ai', 'machine learning', 'ingeniero']
+            }
+            
+            # Obtener keywords del tipo recomendado
+            keywords = cv_keywords.get(cv_recommendation.cv_type, [])
+            
+            # Verificar si algún keyword está en el nombre del archivo
+            match = any(keyword.lower() in file_name_lower for keyword in keywords)
+            
+            if match:
+                self.logger.info(f"  CV '{file_name}' coincide con tipo '{cv_recommendation.cv_type}'")
+            else:
+                self.logger.info(f"  CV '{file_name}' NO coincide con tipo '{cv_recommendation.cv_type}'")
+            
+            return match
+            
+        except Exception as e:
+            self.logger.info(f"Error verificando match de CV: {e}")
             return False
     
     def _fill_field_with_answer(self, field, answer_data) -> bool:
@@ -537,11 +817,30 @@ class LinkedInApplier:
                 if field.field_type == 'dropdown':
                     from selenium.webdriver.support.ui import Select
                     select = Select(element)
-                    # Buscar opción que coincida con la respuesta
+                    
+                    # Primero intentar coincidencia exacta (case-insensitive)
+                    answer_lower = answer_data.answer.lower().strip()
                     for option in select.options:
-                        if answer_data.answer.lower() in option.text.lower():
-                            select.select_by_visible_text(option.text)
+                        option_text = option.text.strip()
+                        if option_text.lower() == answer_lower:
+                            select.select_by_visible_text(option_text)
+                            self.logger.info(f"      ✓ Dropdown seleccionado (coincidencia exacta): {option_text}")
                             return True
+                    
+                    # Si no hay coincidencia exacta, buscar coincidencia parcial
+                    for option in select.options:
+                        option_text = option.text.strip()
+                        # Buscar si la respuesta está contenida en la opción O viceversa
+                        if answer_lower in option_text.lower() or option_text.lower() in answer_lower:
+                            select.select_by_visible_text(option_text)
+                            self.logger.info(f"      ✓ Dropdown seleccionado (coincidencia parcial): {option_text}")
+                            return True
+                    
+                    # Si no se encontró coincidencia, loguear las opciones disponibles
+                    self.logger.warning(f"      ✗ No se encontró coincidencia para '{answer_data.answer}'")
+                    self.logger.warning(f"      Opciones disponibles:")
+                    for option in select.options:
+                        self.logger.warning(f"        - {option.text.strip()}")
                     return False
                     
                 elif field.field_type in ['radio', 'checkbox']:
@@ -554,16 +853,52 @@ class LinkedInApplier:
                             return True
                     return False
                     
-                else:  # text, email, phone, textarea
+                else:  # text, email, phone, textarea, numeric
+                    # Para campos numéricos y de texto, usar JavaScript para mayor confiabilidad
+                    self.logger.info(f"      → Llenando campo {field.field_type} con: {answer_data.answer}")
+                    
+                    # Primero intentar con Selenium
                     element.clear()
                     element.send_keys(answer_data.answer)
-                    return True
+                    
+                    # Verificar que el valor se haya establecido
+                    current_value = element.get_attribute('value')
+                    if current_value == answer_data.answer:
+                        self.logger.info(f"      ✓ Campo llenado correctamente (Selenium)")
+                        return True
+                    else:
+                        # Si no funcionó, usar JavaScript
+                        self.logger.warning(f"      Selenium no estableció el valor, usando JavaScript...")
+                        self.driver.execute_script(
+                            """
+                            arguments[0].value = arguments[1];
+                            arguments[0].dispatchEvent(new Event('input', { bubbles: true }));
+                            arguments[0].dispatchEvent(new Event('change', { bubbles: true }));
+                            arguments[0].dispatchEvent(new Event('blur', { bubbles: true }));
+                            """,
+                            element,
+                            answer_data.answer
+                        )
+                        
+                        # Verificar nuevamente
+                        current_value = element.get_attribute('value')
+                        if current_value == answer_data.answer:
+                            self.logger.info(f"      ✓ Campo llenado correctamente (JavaScript)")
+                            return True
+                        else:
+                            self.logger.warning(f"      ✗ No se pudo establecer el valor. Esperado: {answer_data.answer}, Actual: {current_value}")
+                            return False
                     
             except Exception as e:
                 # Fallback a JavaScript
                 self.logger.warning(f"    Selenium falló, usando JavaScript: {e}")
                 self.driver.execute_script(
-                    "arguments[0].value = arguments[1]; arguments[0].dispatchEvent(new Event('input', { bubbles: true }));",
+                    """
+                    arguments[0].value = arguments[1];
+                    arguments[0].dispatchEvent(new Event('input', { bubbles: true }));
+                    arguments[0].dispatchEvent(new Event('change', { bubbles: true }));
+                    arguments[0].dispatchEvent(new Event('blur', { bubbles: true }));
+                    """,
                     element,
                     answer_data.answer
                 )
