@@ -36,7 +36,7 @@ class QuestionHandler:
     - 3 años Ruby on Rails (desarrollo full stack, APIs RESTful)
     - 2 años automatización (n8n, Selenium, web scraping)
     - 2 años data engineering (Snowflake, ETL)
-    - 2 años ML/AI (PyTorch, TensorFlow, modelos generativos)
+    - 3 años ML/AI (PyTorch, TensorFlow, modelos generativos, 1 año universidad + 1 año tesis + 1 año profesional)
     
     HABILIDADES TÉCNICAS:
     - Backend: Python, Ruby on Rails, Django, APIs RESTful
@@ -354,8 +354,12 @@ RESPONDE EN JSON:"""
             'sql': '4',
             'docker': '2',
             'aws': '2',
-            'machine learning': '2',
-            'ml': '2',
+            'machine learning': '3',
+            'ml': '3',
+            'ai': '3',
+            'ia': '3',
+            'inteligencia artificial': '3',
+            'artificial intelligence': '3',
             'automatización': '2',
             'automation': '2',
             'data': '2',

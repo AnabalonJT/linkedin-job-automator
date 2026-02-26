@@ -99,7 +99,13 @@ class TelegramNotifierWithAccumulation(TelegramNotifier):
         Returns:
             Response from Telegram API or error dict
         """
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        logger.info(f"send_summary called with {len(self.results)} results")
+        
         if not self.results:
+            logger.warning("No results to send - results list is empty")
             return {'error': 'No results to send'}
         
         import datetime
@@ -111,6 +117,8 @@ class TelegramNotifierWithAccumulation(TelegramNotifier):
         uncertain = sum(1 for r in self.results if r['result'].get('status') == 'INSEGURO')
         unavailable = sum(1 for r in self.results if r['result'].get('status') == 'NO_DISPONIBLE')
         errors = sum(1 for r in self.results if r['result'].get('status') == 'ERROR')
+        
+        logger.info(f"Statistics: total={total}, successful={successful}, manual={manual}, uncertain={uncertain}, unavailable={unavailable}, errors={errors}")
         
         # Calculate AI statistics
         total_questions = sum(len(r['result'].get('questions_answered', [])) for r in self.results)
@@ -170,9 +178,13 @@ class TelegramNotifierWithAccumulation(TelegramNotifier):
         message = "\n".join(lines)
         
         try:
-            return self.send_message(message)
+            response = self.send_message(message)
+            return response
         except Exception as e:
-            return {'error': str(e)}
+            # Log the error and re-raise
+            import logging
+            logging.error(f"Error sending Telegram message: {e}")
+            raise
 
 
 if __name__ == '__main__':

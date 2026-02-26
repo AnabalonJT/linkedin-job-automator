@@ -129,6 +129,44 @@ class LinkedInApplier:
         except Exception as e:
             self.logger.warning(f"Error updating Google Sheets: {e}")
     
+    def _update_jobs_found(self, job_url: str, status: str):
+        """
+        Actualiza el estado de un trabajo en jobs_found.json
+        
+        Args:
+            job_url: URL del trabajo
+            status: Estado de la aplicación (APPLIED, MANUAL, etc.)
+        """
+        try:
+            jobs_found_file = Path("data/logs/jobs_found.json")
+            
+            if not jobs_found_file.exists():
+                return
+            
+            # Leer jobs_found.json
+            with open(jobs_found_file, 'r', encoding='utf-8') as f:
+                all_jobs = json.load(f)
+            
+            # Buscar y actualizar el trabajo
+            updated = False
+            for job in all_jobs:
+                if job.get('url') == job_url:
+                    # Marcar como no nuevo (ya procesado)
+                    job['is_new'] = False
+                    # Agregar estado de aplicación
+                    job['application_status'] = status
+                    updated = True
+                    break
+            
+            if updated:
+                # Guardar cambios
+                with open(jobs_found_file, 'w', encoding='utf-8') as f:
+                    json.dump(all_jobs, f, indent=2, ensure_ascii=False)
+                self.logger.info(f"  ✓ jobs_found.json actualizado: is_new=false, status={status}")
+            
+        except Exception as e:
+            self.logger.warning(f"  Error actualizando jobs_found.json: {e}")
+    
     def _is_job_unavailable(self) -> bool:
         """
         Verifica si el trabajo ya no acepta postulaciones
@@ -149,6 +187,62 @@ class LinkedInApplier:
             page_text = self.driver.find_element(By.TAG_NAME, "body").text
             return any(indicator.lower() in page_text.lower() for indicator in closed_indicators)
         except Exception:
+            return False
+    
+    def _is_already_applied(self) -> bool:
+        """
+        Verifica si ya se aplicó a este trabajo detectando el mensaje "Solicitud enviada"
+        
+        Returns:
+            True si ya se aplicó a este trabajo
+        """
+        try:
+            # Buscar indicadores de que ya se aplicó
+            applied_indicators = [
+                "Solicitud enviada",
+                "Application sent",
+                "Applied",
+                "Ya has enviado tu solicitud",
+                "You've already applied",
+                "Estado de la solicitud"
+            ]
+            
+            # Buscar en el texto de la página
+            page_text = self.driver.find_element(By.TAG_NAME, "body").text
+            
+            for indicator in applied_indicators:
+                if indicator in page_text:
+                    self.logger.info(f"  → Detectado indicador: '{indicator}'")
+                    return True
+            
+            # Buscar elementos específicos que indican aplicación enviada
+            applied_selectors = [
+                # Título "Estado de la solicitud"
+                "//h2[contains(text(), 'Estado de la solicitud')]",
+                "//h2[contains(text(), 'Application status')]",
+                # Texto "Solicitud enviada"
+                "//p[contains(text(), 'Solicitud enviada')]",
+                "//p[contains(text(), 'Application sent')]",
+                # Botón de aplicación ya usado
+                "//div[contains(@class, 'jobs-apply-button--applied')]",
+                # Link "Ver currículum" que aparece después de aplicar
+                "//a[contains(text(), 'Ver currículum')]",
+                "//a[contains(text(), 'View resume')]"
+            ]
+            
+            for selector in applied_selectors:
+                try:
+                    elements = self.driver.find_elements(By.XPATH, selector)
+                    if elements and any(el.is_displayed() for el in elements):
+                        self.logger.info(f"  → Detectado elemento de aplicación enviada")
+                        return True
+                except:
+                    continue
+            
+            return False
+            
+        except Exception as e:
+            self.logger.warning(f"  Error verificando si ya se aplicó: {e}")
             return False
     
     def _expand_job_description(self, job: Dict[str, Any]) -> str:
@@ -509,7 +603,8 @@ class LinkedInApplier:
                             'question': question_text,
                             'answer': answer_data.answer,
                             'confidence': answer_data.confidence,
-                            'reasoning': answer_data.reasoning
+                            'reasoning': answer_data.reasoning,
+                            'field_type': field.field_type  # Agregar field_type
                         })
                     else:
                         self.logger.warning(f"    ✗ No se pudo llenar campo")
@@ -566,24 +661,22 @@ class LinkedInApplier:
                 except Exception as e:
                     self.logger.warning(f"  Error buscando/subiendo CV: {e}")
             
-            # 3. Buscar y hacer clic en botón siguiente/enviar
+            # 3. Buscar botón siguiente/enviar (sin hacer clic todavía)
             time.sleep(1)
             
-            button_result = self._click_next_or_submit_button()
+            button_info = self._detect_next_or_submit_button()
             
-            if not button_result['found']:
+            if not button_info['found']:
                 self.logger.warning("  ⚠ No se encontró botón de acción")
                 result['error'] = f"No se encontró botón en paso {current_step}"
                 result['status'] = 'MANUAL'
                 result['questions_answered'] = questions_answered
                 return False
             
-            self.logger.info(f"  ✓ Click en botón: '{button_result.get('button_text', 'Unknown')}'")
-            time.sleep(2)
-            
-            # 4. Si era botón de envío, evaluar confianza y decidir
-            if button_result.get('is_submit'):
-                self.logger.info("  → Botón de envío detectado, evaluando confianza...")
+            # 4. Si es botón de envío, evaluar confianza ANTES de hacer clic
+            if button_info.get('is_submit'):
+                self.logger.info(f"  → Botón de envío detectado: '{button_info.get('button_text', 'Unknown')}'")
+                self.logger.info("  → Evaluando confianza ANTES de enviar...")
                 
                 # Convertir a QuestionAnswer objects para el sistema de confianza
                 from models import QuestionAnswer
@@ -593,7 +686,8 @@ class LinkedInApplier:
                         answer=qa['answer'],
                         confidence=qa['confidence'],
                         reasoning=qa['reasoning'],
-                        sources=[]
+                        sources=[],
+                        field_type=qa.get('field_type', 'text')  # Agregar field_type con fallback
                     )
                     for qa in questions_answered
                 ]
@@ -607,24 +701,9 @@ class LinkedInApplier:
                 self.logger.info(f"  → Decisión: {decision.action} (confianza: {decision.overall_confidence:.2f})")
                 self.logger.info(f"    Razón: {decision.reasoning}")
                 
-                if decision.action == 'SUBMIT':
-                    # Enviar aplicación
-                    self.logger.success("  ✓ Confianza alta - Enviando aplicación")
-                    result['status'] = 'APPLIED'
-                    result['success'] = True
-                    return True
-                    
-                elif decision.action == 'UNCERTAIN':
-                    # Enviar pero marcar como inseguro
-                    self.logger.warning("  ⚠ Confianza media - Enviando pero marcando como INSEGURO")
-                    result['status'] = 'INSEGURO'
-                    result['success'] = True
-                    result['low_confidence_questions'] = decision.low_confidence_questions
-                    return True
-                    
-                else:  # MANUAL
+                if decision.action == 'MANUAL':
                     # No enviar, requiere revisión manual
-                    self.logger.warning("  ✗ Confianza baja - Requiere revisión manual")
+                    self.logger.warning("  ✗ Confianza baja - NO enviando, requiere revisión manual")
                     result['status'] = 'MANUAL'
                     result['error'] = f"Confianza insuficiente ({decision.overall_confidence:.2f})"
                     result['low_confidence_questions'] = decision.low_confidence_questions
@@ -632,6 +711,43 @@ class LinkedInApplier:
                     # Cerrar modal sin enviar
                     self._close_modal()
                     return False
+                
+                # Si llegamos aquí, confianza es suficiente (SUBMIT o UNCERTAIN)
+                # Ahora sí hacer clic en enviar
+                self.logger.info(f"  → Confianza suficiente, haciendo clic en 'Enviar solicitud'...")
+                click_result = self._click_button(button_info['element_selector'])
+                
+                if not click_result:
+                    self.logger.error("  ✗ Error haciendo clic en botón de envío")
+                    result['status'] = 'ERROR'
+                    result['error'] = "No se pudo hacer clic en botón de envío"
+                    return False
+                
+                time.sleep(2)
+                
+                if decision.action == 'SUBMIT':
+                    self.logger.success("  ✓ Confianza alta - Aplicación enviada")
+                    result['status'] = 'APPLIED'
+                    result['success'] = True
+                    return True
+                else:  # UNCERTAIN
+                    self.logger.warning("  ⚠ Confianza media - Aplicación enviada pero marcada como INSEGURA")
+                    result['status'] = 'INSEGURO'
+                    result['success'] = True
+                    result['low_confidence_questions'] = decision.low_confidence_questions
+                    return True
+            
+            # Si no es botón de envío, hacer clic normalmente
+            self.logger.info(f"  ✓ Haciendo clic en botón: '{button_info.get('button_text', 'Unknown')}'")
+            click_result = self._click_button(button_info['element_selector'])
+            
+            if not click_result:
+                self.logger.error("  ✗ Error haciendo clic en botón")
+                result['status'] = 'ERROR'
+                result['error'] = f"No se pudo hacer clic en botón en paso {current_step}"
+                return False
+            
+            time.sleep(2)
         
         # Si llegamos aquí, se alcanzó el límite de pasos
         self.logger.warning(f"  Se alcanzó el límite de {max_steps} pasos")
@@ -906,6 +1022,118 @@ class LinkedInApplier:
                 
         except Exception as e:
             self.logger.warning(f"    Error llenando campo: {e}")
+            return False
+    
+    def _detect_next_or_submit_button(self) -> dict:
+        """
+        Detecta el botón siguiente o enviar SIN hacer clic
+        
+        Returns:
+            Dict con {found: bool, is_submit: bool, button_text: str, element_selector: str}
+        """
+        try:
+            detect_script = """
+            let debug = {
+                total_buttons: document.querySelectorAll('button').length,
+                visible_buttons: 0,
+                buttons_found: []
+            };
+            
+            // Buscar botón de acción
+            const buttonSelectors = [
+                'button[data-easy-apply-next-button]',
+                'button[aria-label*="siguiente"]',
+                'button[aria-label*="Next"]',
+                'button[aria-label*="Enviar"]',
+                'button[aria-label*="Submit"]',
+                'button[aria-label*="Revisar"]',
+                'button[aria-label*="Review"]',
+                'button.artdeco-button--primary'
+            ];
+            
+            // Listar botones visibles para debugging
+            const allButtons = document.querySelectorAll('button');
+            for (let btn of allButtons) {
+                if (btn.offsetParent !== null) {
+                    debug.visible_buttons++;
+                    debug.buttons_found.push({
+                        text: btn.textContent.trim().substring(0, 50),
+                        aria: (btn.getAttribute('aria-label') || '').substring(0, 50)
+                    });
+                }
+            }
+            
+            // Buscar botón específico (SIN hacer clic)
+            for (let i = 0; i < buttonSelectors.length; i++) {
+                const selector = buttonSelectors[i];
+                const buttons = document.querySelectorAll(selector);
+                for (let j = 0; j < buttons.length; j++) {
+                    const btn = buttons[j];
+                    if (btn.offsetParent !== null) {
+                        const ariaLabel = btn.getAttribute('aria-label') || '';
+                        const text = btn.textContent || '';
+                        const isSubmit = ariaLabel.toLowerCase().includes('enviar') || 
+                                       ariaLabel.toLowerCase().includes('submit') ||
+                                       text.toLowerCase().includes('enviar');
+                        
+                        // Crear un selector único para este botón
+                        const btnId = btn.id || `btn_${i}_${j}`;
+                        if (!btn.id) {
+                            btn.id = btnId;
+                        }
+                        
+                        return {
+                            found: true,
+                            is_submit: isSubmit,
+                            button_text: text.trim(),
+                            aria_label: ariaLabel,
+                            element_selector: `#${btnId}`,
+                            debug: debug
+                        };
+                    }
+                }
+            }
+            
+            return {found: false, debug: debug};
+            """
+            
+            result = self.driver.execute_script(detect_script)
+            
+            if result and result.get('debug'):
+                debug = result['debug']
+                self.logger.info(f"  → Debug: {debug['total_buttons']} botones totales, {debug['visible_buttons']} visibles")
+            
+            return result if result else {'found': False}
+            
+        except Exception as e:
+            self.logger.warning(f"  Error detectando botón: {e}")
+            return {'found': False}
+    
+    def _click_button(self, selector: str) -> bool:
+        """
+        Hace clic en un botón usando su selector
+        
+        Args:
+            selector: Selector CSS del botón
+            
+        Returns:
+            True si se hizo clic exitosamente
+        """
+        try:
+            click_script = f"""
+            const btn = document.querySelector('{selector}');
+            if (btn && btn.offsetParent !== null) {{
+                btn.click();
+                return true;
+            }}
+            return false;
+            """
+            
+            result = self.driver.execute_script(click_script)
+            return bool(result)
+            
+        except Exception as e:
+            self.logger.warning(f"  Error haciendo clic en botón: {e}")
             return False
     
     def _click_next_or_submit_button(self) -> dict:
@@ -1413,6 +1641,11 @@ class LinkedInApplier:
                 self.logger.info("✓ Trabajo ya procesado anteriormente, saltando...")
                 result['status'] = 'SKIPPED'
                 result['error'] = 'Already processed'
+                
+                # Acumular resultado para Telegram incluso si se salta
+                if self.telegram_notifier:
+                    self.telegram_notifier.accumulate_result(job, result)
+                
                 return result
             
             # 2. Verificar CAPTCHA o bloqueo antes de procesar
@@ -1437,7 +1670,25 @@ class LinkedInApplier:
             self.driver.execute_script("window.scrollTo(0, 300);")
             time.sleep(1)
             
-            # 3. Verificar si el trabajo ya no acepta postulaciones (eliminado/cerrado)
+            # 3.5. Verificar si ya se aplicó a este trabajo (detectar "Solicitud enviada")
+            # IMPORTANTE: Hacer esto ANTES de expandir descripción y seleccionar CV
+            if self._is_already_applied():
+                result['error'] = "Ya se aplicó a este trabajo anteriormente"
+                result['status'] = 'APPLIED'
+                result['success'] = True
+                self.logger.info("✓ Ya se aplicó a este trabajo anteriormente")
+                
+                # Update state and sheets
+                self.state_manager.save_job_state(job['url'], 'APPLIED', None, None)
+                if self.sheets_updater:
+                    self._update_sheets(job, result)
+                
+                # Update jobs_found.json
+                self._update_jobs_found(job['url'], 'APPLIED')
+                
+                return result
+            
+            # 4. Verificar si el trabajo ya no acepta postulaciones (eliminado/cerrado)
             if self._is_job_unavailable():
                 result['error'] = "Trabajo ya no acepta postulaciones (eliminado/cerrado)"
                 result['status'] = 'NO_DISPONIBLE'
@@ -1448,12 +1699,15 @@ class LinkedInApplier:
                 if self.sheets_updater:
                     self._update_sheets(job, result)
                 
+                # Update jobs_found.json
+                self._update_jobs_found(job['url'], 'NO_DISPONIBLE')
+                
                 return result
             
-            # 4. Expandir descripción completa (si hay botón "Ver más")
+            # 5. Expandir descripción completa (si hay botón "Ver más")
             full_description = self._expand_job_description(job)
             
-            # 5. Seleccionar CV con IA
+            # 6. Seleccionar CV con IA
             cv_recommendation = self.cv_selector.select_cv(
                 job_title=job['title'],
                 job_description=full_description
@@ -1469,7 +1723,7 @@ class LinkedInApplier:
                 self.state_manager.save_job_state(job['url'], 'ERROR', None, result['error'])
                 return result
             
-            # 6. Buscar y hacer clic en botón Easy Apply
+            # 7. Buscar y hacer clic en botón Easy Apply
             # Guardar URL antes del clic para detectar redirects
             url_before_click = self.driver.current_url
             self.logger.info(f"  URL antes del clic: {url_before_click}")
@@ -1481,7 +1735,7 @@ class LinkedInApplier:
                     self._update_sheets(job, result)
                 return result
             
-            # 7. Detectar modal con JavaScript (pasar URL inicial para detectar redirects)
+            # 8. Detectar modal con JavaScript (pasar URL inicial para detectar redirects)
             modal_element = self.modal_detector.wait_for_modal(self.driver, timeout=20, initial_url=url_before_click)
             
             if not modal_element:
@@ -1500,7 +1754,7 @@ class LinkedInApplier:
             
             self.logger.info("  ✓ Modal detectado exitosamente")
             
-            # 8. Procesar formulario multi-paso con IA
+            # 9. Procesar formulario multi-paso con IA
             aplicacion_exitosa = self._process_application_form_with_ai(
                 job, result, modal_element, cv_recommendation, full_description
             )
@@ -1511,7 +1765,7 @@ class LinkedInApplier:
             else:
                 self.logger.warning(f"✗ No se pudo completar la aplicación")
             
-            # 9. Guardar estado final
+            # 10. Guardar estado final
             self.state_manager.save_job_state(
                 job['url'], 
                 result['status'], 
@@ -1519,11 +1773,14 @@ class LinkedInApplier:
                 result.get('error')
             )
             
-            # 10. Actualizar Google Sheets
+            # 11. Actualizar Google Sheets
             if self.sheets_updater:
                 self._update_sheets(job, result)
             
-            # 11. Acumular resultado para Telegram
+            # 11.5. Actualizar jobs_found.json
+            self._update_jobs_found(job['url'], result['status'])
+            
+            # 12. Acumular resultado para Telegram
             if self.telegram_notifier:
                 self.telegram_notifier.accumulate_result(job, result)
             
@@ -2118,7 +2375,25 @@ def main():
     # Filtrar solo trabajos nuevos con Easy Apply
     pending_jobs = [job for job in all_jobs if job.get('has_easy_apply')]
     
+    # Priorizar trabajos no procesados
+    # Separar en dos grupos: no procesados y procesados
+    state_manager = StateManager(state_file="data/logs/application_state.json")
+    
+    unprocessed_jobs = []
+    processed_jobs = []
+    
+    for job in pending_jobs:
+        if state_manager.is_job_processed(job['url']):
+            processed_jobs.append(job)
+        else:
+            unprocessed_jobs.append(job)
+    
+    # Ordenar: primero los no procesados, luego los procesados
+    pending_jobs = unprocessed_jobs + processed_jobs
+    
     logger.info(f"Trabajos pendientes de aplicar: {len(pending_jobs)}")
+    logger.info(f"  - No procesados (nuevos): {len(unprocessed_jobs)}")
+    logger.info(f"  - Ya procesados (reintentos): {len(processed_jobs)}")
     
     if len(pending_jobs) == 0:
         logger.info("No hay trabajos nuevos con Easy Apply")
@@ -2208,10 +2483,18 @@ def main():
         try:
             logger.info("\n" + "="*60)
             logger.info("Enviando resumen por Telegram...")
-            applier.telegram_notifier.send_summary()
-            logger.info("✓ Resumen enviado por Telegram")
+            response = applier.telegram_notifier.send_summary()
+            
+            # Verificar si hubo error
+            if 'error' in response:
+                logger.warning(f"✗ Error enviando resumen por Telegram: {response['error']}")
+            else:
+                logger.info("✓ Resumen enviado por Telegram exitosamente")
+                logger.info(f"  Respuesta: {response.get('ok', False)}")
         except Exception as e:
-            logger.warning(f"No se pudo enviar resumen por Telegram: {e}")
+            logger.warning(f"✗ No se pudo enviar resumen por Telegram: {e}")
+            import traceback
+            logger.warning(traceback.format_exc())
     
     # Mostrar resumen en consola
     logger.info(f"\n{'='*60}")

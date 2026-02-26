@@ -615,6 +615,14 @@ def main():
         logger.info(f"  - {len(all_sheets_jobs)} trabajos existentes (is_new: false)")
         logger.info(f"  - {len(new_jobs)} trabajos nuevos (is_new: true)")
         
+        # ============================================================================
+        # PASO 4: Actualizar new_jobs_to_apply.json con trabajos nuevos
+        # ============================================================================
+        new_jobs_file = Path("data/logs/new_jobs_to_apply.json")
+        with open(new_jobs_file, 'w', encoding='utf-8') as f:
+            json.dump(new_jobs, f, indent=2, ensure_ascii=False)
+        logger.success(f"✓ new_jobs_to_apply.json actualizado: {len(new_jobs)} trabajos nuevos")
+        
         
         # Mostrar los nuevos trabajos encontrados
         if new_jobs:

@@ -96,7 +96,6 @@ class StateManager:
         self,
         job_url: str,
         status: str,
-        timestamp: datetime = None,
         cv_used: str = None,
         error_message: str = None
     ):
@@ -106,12 +105,10 @@ class StateManager:
         Args:
             job_url: URL del trabajo
             status: Estado (APPLIED, MANUAL, NO_DISPONIBLE, ERROR, INSEGURO)
-            timestamp: Fecha y hora del procesamiento (default: ahora)
             cv_used: CV utilizado (opcional)
             error_message: Mensaje de error si falló (opcional)
         """
-        if timestamp is None:
-            timestamp = datetime.now()
+        timestamp = datetime.now()
         
         try:
             # Cargar estado actual
